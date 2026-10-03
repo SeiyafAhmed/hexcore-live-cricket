@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hexcore Cricket Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="text/javascript" src="/eel.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+        .heading-font {
+            font-family: 'Outfit', sans-serif;
+        }
+        /* Grid Buttons for Live Scorer */
+        .grid-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.35rem;
+            font-weight: 800;
+            border-radius: 0.65rem;
+            cursor: pointer;
+            height: 3.75rem;
+            color: white;
+            user-select: none;
+            transition: all 0.12s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+        }
+        .grid-button:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.08);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.18);
+        }
+        .grid-button:active {
+            transform: translateY(1px);
+            opacity: 0.85;
+            box-shadow: none;
+        }
+        
+        /* Modern Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(241, 245, 249, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* Sidebar Navigation Active states */
+        .nav-item-active {
+            background: linear-gradient(90deg, rgba(16, 185, 129, 0.18) 0%, rgba(16, 185, 129, 0.05) 100%);
+            border-left: 4px solid #10b981;
+            color: #ffffff !important;
+            font-weight: 700;
+        }
+        .nav-item-active svg {
+            color: #10b981 !important;
+            filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.4));
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.15); }
+        }
+        .animate-pulse-glow {
+            animation: pulseGlow 2s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 flex h-screen overflow-hidden antialiased select-none">
+
+    <!-- ===================================================================== -->
+    <!-- APP SIDEBAR                                                           -->
+    <!-- ===================================================================== -->
+    <aside id="app-sidebar" class="w-64 bg-gradient-to-b from-[#0a1122] via-[#0d162c] to-[#070b16] border-r border-slate-800/80 flex flex-col justify-between flex-shrink-0 z-30 shadow-2xl">
+        <!-- Brand & Header -->
+        <div class="p-5 border-b border-slate-800/60">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-500 to-cyan-400 p-[2px] shadow-lg shadow-emerald-500/20 flex items-center justify-center">
+                    <div class="w-full h-full bg-[#0a1122] rounded-[10px] flex items-center justify-center">
+                        <svg class="w-6 h-6 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+                            <path d="M2 12h20"/>
+                        </svg>
+                    </div>
+                </div>
+                <div>
+                    <h1 class="heading-font text-lg font-black tracking-wider text-white flex items-center gap-1.5">
+                        HEXCORE <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">PRO</span>
+                    </h1>
+                    <p class="text-[11px] font-medium text-slate-400 uppercase tracking-widest">Live Cricket Studio</p>
+                </div>
+            </div>
+
+            <!-- Live Engine Indicator -->
+            <div class="mt-4 flex items-center justify-between px-3 py-1.5 bg-slate-900/80 rounded-lg border border-slate-800 text-xs text-slate-300">
+                <span class="flex items-center gap-2 font-medium">
+                    <span class="relative flex h-2.5 w-2.5">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <span id="sidebar-engine-status">Engine Ready</span>
+                </span>
+                <span class="text-[10px] text-slate-400 font-mono" id="sidebar-conn-type">DRF/WS</span>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <nav class="flex-1 px-3 py-4 flex flex-col gap-1.5 overflow-y-auto">
+            <div class="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">Navigation</div>
+            
+            <!-- Tab 1: Scoreboard -->
+            <button id="nav-tab-scoreboard" onclick="switchSidebarTab('scoreboard')" class="nav-item-active w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm transition-all duration-150 text-slate-300 hover:text-white hover:bg-slate-800/40 group">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-slate-400 group-hover:text-emerald-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="20" height="14" x="2" y="5" rx="2"/>
+                        <line x1="2" x2="22" y1="10" y2="10"/>
+                        <circle cx="7" cy="15" r="1"/>
+                        <circle cx="12" cy="15" r="1"/>
+                        <circle cx="17" cy="15" r="1"/>
+                    </svg>
+                    <span class="font-semibold">Scoreboard</span>
+                </div>
+                <span id="badge-scoreboard" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Live</span>
+            </button>
+
+            <!-- Tab 2: Teams -->
+            <button id="nav-tab-teams" onclick="switchSidebarTab('teams')" class="w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800/40 group">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-slate-400 group-hover:text-emerald-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>
+                        <path d="m9 12 2 2 4-4"/>
+                    </svg>
+                    <span class="font-semibold">Teams</span>
+                </div>
+                <span id="badge-teams-count" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">0</span>
+            </button>
+
+            <!-- Tab 3: Players -->
+            <button id="nav-tab-players" onclick="switchSidebarTab('players')" class="w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800/40 group">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-slate-400 group-hover:text-emerald-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    <span class="font-semibold">Players</span>
+                </div>
+                <span id="badge-players-count" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">0</span>
+            </button>
+        </nav>
+
+        <!-- Sidebar Footer -->
+        <div class="p-4 border-t border-slate-800/60 bg-slate-950/40">
+            <div class="p-3 bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800/80 rounded-xl">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] text-slate-400 font-medium">Backend Sync</span>
+                    <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+                </div>
+                <div class="mt-1 text-xs font-bold text-slate-200" id="sidebar-match-status">Ready to Score</div>
+                <div class="mt-0.5 text-[10px] text-slate-400 truncate" id="sidebar-match-subtitle">Select teams to start</div>
+            </div>
+            <div class="mt-3 text-[10px] text-center text-slate-400">Hexcore Live Cricket v2.4</div>
+        </div>
+    </aside>
+
+    <!-- ===================================================================== -->
+    <!-- MAIN CONTENT AREA                                                     -->
+    <!-- ===================================================================== -->
+    <main class="flex-1 h-screen overflow-y-auto bg-slate-100 text-slate-800 flex flex-col relative">
+
+        <!-- ================================================================= -->
+        <!-- TAB 1: SCOREBOARD VIEW                                            -->
+        <!-- ================================================================= -->
+        <div id="view-scoreboard" class="app-tab-view flex-1 flex flex-col">
+            
+            <!-- Setup Screen -->
+            <div id="setup-screen" class="p-8 max-w-4xl mx-auto w-full animate-fade-in">
+                <div class="bg-white rounded-2xl shadow-xl border border-slate-200/80 p-8">
+                    <div class="flex items-center justify-between pb-6 border-b border-slate-100">
+                        <div>
+                            <h1 class="heading-font text-3xl font-extrabold text-slate-900">Setup Match</h1>
+                            <p class="text-sm text-slate-500 mt-1">Configure teams, opening players, and match overs to begin live broadcast scoring.</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xl">
+                            🏏
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-6">
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Batting Team</label>
+                            <select id="setup-batting-team" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Bowling Team</label>
+                            <select id="setup-bowling-team" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Striker</label>
+                            <select id="setup-striker" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Non-Striker</label>
+                            <select id="setup-nonstriker" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Opening Bowler</label>
+                            <select id="setup-bowler" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Overs</label>
+                            <input id="setup-overs" type="number" value="20" min="1" max="100" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all">
+                        </div>
+                    </div>
+
+                    <div class="mt-8 flex justify-end gap-3 pt-6 border-t border-slate-100">
+                        <button onclick="startMatch()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-8 py-3.5 rounded-xl shadow-lg shadow-emerald-600/25 active:scale-98 transition-all flex items-center gap-2">
+                            <span>Start Match</span>
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Match Summary Screen -->
+            <div id="match-summary-screen" class="hidden min-h-screen bg-gray-50 flex flex-col relative pb-16">
+                <!-- Dynamically populated by main.js -->
+            </div>
+
+            <!-- Scoring Screen -->
+            <div id="scoring-screen" class="hidden p-6 max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-[450px_1fr] gap-6 animate-fade-in">
+                <!-- LEFT COLUMN: Admin Control -->
+                <div class="border-r border-slate-200 pr-6 flex flex-col gap-4">
+                    
+                    <!-- Top Header -->
+                    <div class="flex justify-between items-center text-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80">
+                        <div class="flex flex-col items-center">
+                            <img id="team1-img" src="" class="w-16 h-16 rounded-xl mb-1 object-contain bg-white shadow-sm border border-slate-100 hidden">
+                            <div class="w-16 h-16 bg-[#0f547c] rounded-xl mb-1 flex items-center justify-center text-white font-extrabold text-xl shadow-sm" id="team1-placeholder"></div>
+                            <div class="font-bold text-slate-800 text-sm max-w-[90px] truncate" id="team1-name">Team A</div>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="text-3xl font-black heading-font text-slate-900" id="team1-score">0/0</div>
+                            <div class="text-slate-500 text-sm font-semibold" id="team1-overs">(0)</div>
+                        </div>
+                        <div class="flex flex-col items-center justify-center px-1">
+                            <div class="text-slate-400 text-xs font-black px-2 py-0.5 bg-slate-100 rounded-full">VS</div>
+                            <div id="match-max-overs" class="text-[11px] text-slate-400 font-bold mt-1"></div>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="text-3xl font-black heading-font text-slate-900" id="team2-score">0/0</div>
+                            <div class="text-slate-500 text-sm font-semibold" id="team2-overs">(0.0)</div>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <img id="team2-img" src="" class="w-16 h-16 rounded-xl mb-1 object-contain bg-white shadow-sm border border-slate-100 hidden">
+                            <div class="w-16 h-16 bg-[#0f547c] rounded-xl mb-1 flex items-center justify-center text-white font-extrabold text-xl shadow-sm" id="team2-placeholder"></div>
+                            <div class="font-bold text-slate-800 text-sm max-w-[90px] truncate" id="team2-name">Team B</div>
+                        </div>
+                    </div>
+
+                    <!-- Target & RR -->
+                    <div class="bg-white rounded-xl p-3 shadow-sm border border-slate-200/80 flex justify-between text-xs font-bold text-slate-700">
+                        <div id="lbl-target" class="text-indigo-600">Target: -</div>
+                        <div id="lbl-rr" class="text-emerald-600">RR: 0.0</div>
+                        <div id="lbl-rrr" class="text-amber-600">RRR: -</div>
+                    </div>
+                    <div class="text-center text-xs font-bold text-slate-600 px-2" id="lbl-equation"></div>
+
+                    <!-- Active Players -->
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex justify-between items-center bg-[#258a43] text-white px-3.5 py-2.5 rounded-xl font-bold shadow-sm">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-emerald-200 animate-pulse"></span>
+                                <span id="striker-name">Batsman 1</span>
+                            </div>
+                            <div id="striker-score" class="text-lg">0 <span class="text-xs font-normal text-emerald-100">(0)</span></div>
+                        </div>
+                        <div class="flex justify-between items-center bg-slate-200 text-slate-900 px-3.5 py-2.5 rounded-xl font-bold">
+                            <div id="nonstriker-name">Batsman 3</div>
+                            <div id="nonstriker-score" class="text-lg">0 <span class="text-xs font-normal text-slate-600">(0)</span></div>
+                        </div>
+                        <div class="flex justify-between items-center bg-emerald-50 border border-emerald-200 text-emerald-950 px-3.5 py-2 rounded-xl font-bold">
+                            <div>Extras</div>
+                            <div id="extras-summary" class="text-xs font-semibold">0 (Wd 0, Nb 0, LB 0)</div>
+                        </div>
+                        <div class="flex justify-between items-center bg-[#1e293b] text-white px-3.5 py-2.5 rounded-xl font-bold shadow-sm">
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs bg-slate-700 px-1.5 py-0.5 rounded text-slate-300">BOWL</span>
+                                <span id="bowler-name">Bowler 2</span>
+                            </div>
+                            <div id="bowler-score" class="text-lg">0-0 <span class="text-xs font-normal text-slate-300">(0.0)</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Balls Tracker -->
+                    <div class="bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">This Over</div>
+                        <div class="flex flex-wrap gap-1.5" id="recent-balls">
+                            <!-- Javascript will inject boxes here -->
+                        </div>
+                    </div>
+
+                    <!-- Admin Control -->
+                    <div class="border border-slate-200/80 bg-white rounded-2xl p-4 shadow-sm relative pt-6 mt-2">
+                        <div class="absolute -top-3 left-4 bg-white px-2.5 py-0.5 text-xs text-slate-500 font-bold uppercase tracking-wider rounded border border-slate-200">Admin Control</div>
+                        <button onclick="undo()" class="absolute -top-3.5 right-4 bg-slate-700 hover:bg-slate-800 text-white px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider shadow transition-colors flex items-center gap-1">
+                            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                            <span>Undo</span>
+                        </button>
+                        
+                        <div class="grid grid-cols-7 gap-2 mt-2">
+                            <div onclick="scoreBall('0')" class="grid-button bg-[#01225e]">0</div>
+                            <div onclick="scoreBall('1')" class="grid-button bg-[#f58133]">1</div>
+                            <div onclick="scoreBall('2')" class="grid-button bg-[#f58133]">2</div>
+                            <div onclick="scoreBall('3')" class="grid-button bg-[#f58133]">3</div>
+                            <div onclick="scoreBall('4')" class="grid-button bg-[#258a43]">4</div>
+                            <div onclick="scoreBall('6')" class="grid-button bg-[#258a43]">6</div>
+                            <div onclick="scoreWicket()" class="grid-button bg-[#cc0000]">W</div>
+                            
+                            <div onclick="scoreExtra('Wd')" class="grid-button bg-white text-black border-2 border-black">Wd</div>
+                            <div onclick="scoreExtra('Nb')" class="grid-button bg-[#fcbf00] text-black">Nb</div>
+                            <div onclick="scoreExtra('Byes')" class="grid-button bg-[#00adef] text-sm">Byes</div>
+                            <div onclick="scoreExtra('LB')" class="grid-button bg-[#00adef]">LB</div>
+                            <div onclick="scoreExtra('5678')" class="grid-button bg-[#f58133] text-sm">5678</div>
+                            <div onclick="scoreExtra('bonus')" class="grid-button bg-[#8c1682] text-sm">bonus</div>
+                            <div onclick="scoreExtra('More')" class="grid-button bg-black text-sm">More</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- RIGHT COLUMN: Scorecard -->
+                <div class="flex flex-col gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80">
+                    
+                    <div class="flex font-bold text-base rounded-xl overflow-hidden shadow-sm">
+                        <div class="flex-1 px-5 py-3 bg-[#c8c9cc] text-slate-800 cursor-pointer select-none transition-all flex items-center justify-between" id="tab-team1" onclick="switchScorecardTab(1)">
+                            <span>Team A</span>
+                            <span class="text-xs font-semibold px-2 py-0.5 rounded bg-black/10">Innings 1</span>
+                        </div>
+                        <div class="flex-1 px-5 py-3 bg-[#258a43] text-white cursor-pointer select-none transition-all flex items-center justify-between" id="tab-team2" onclick="switchScorecardTab(2)">
+                            <span class="text-xs font-semibold px-2 py-0.5 rounded bg-white/20">Innings 2</span>
+                            <span>Team B</span>
+                        </div>
+                    </div>
+
+                    <table class="w-full text-sm mt-1">
+                        <thead>
+                            <tr class="border-b-2 border-slate-200 text-slate-600 font-bold uppercase text-xs">
+                                <th class="text-left py-2.5">Batting</th>
+                                <th class="text-center w-10">R</th>
+                                <th class="text-center w-10">B</th>
+                                <th class="text-center w-10">4s</th>
+                                <th class="text-center w-10">6s</th>
+                                <th class="text-center w-14">S/R</th>
+                            </tr>
+                        </thead>
+                        <tbody id="batting-table-body" class="divide-y divide-slate-100">
+                            <!-- Javascript will inject rows -->
+                        </tbody>
+                    </table>
+                    
+                    <div class="mt-2 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        <div class="font-bold text-slate-700 uppercase tracking-wider text-[11px]">Yet to bat</div>
+                        <div class="text-slate-500 mt-1 font-medium" id="yet-to-bat"></div>
+                    </div>
+
+                    <table class="w-full text-sm mt-4">
+                        <thead>
+                            <tr class="border-b-2 border-slate-200 text-slate-600 font-bold uppercase text-xs">
+                                <th class="text-left py-2.5">Bowling</th>
+                                <th class="text-center w-10">O</th>
+                                <th class="text-center w-10">M</th>
+                                <th class="text-center w-10">R</th>
+                                <th class="text-center w-10">W</th>
+                                <th class="text-center w-14">Econ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bowling-table-body" class="divide-y divide-slate-100">
+                            <!-- Javascript will inject rows -->
+                        </tbody>
+                    </table>
+                    
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- TAB 2: TEAMS VIEW                                                 -->
+        <!-- ================================================================= -->
+        <div id="view-teams" class="app-tab-view flex-1 hidden p-8 animate-fade-in">
+            <div class="max-w-7xl mx-auto flex flex-col gap-6">
+                <!-- Header -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+                    <div>
+                        <h1 class="heading-font text-3xl font-extrabold text-slate-900">Teams & Squads</h1>
+                        <p class="text-sm text-slate-500 mt-1">Create clubs, customize theme colors and logos, and manage player squad rosters.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="relative">
+                            <input id="teams-search-input" oninput="filterTeams()" type="text" placeholder="Search teams..." class="pl-9 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent w-64 shadow-sm">
+                            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        </div>
+                        <button onclick="openCreateTeamModal()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-98 transition-all flex items-center gap-2 text-sm whitespace-nowrap">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                            <span>Create Team</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Teams Grid Container -->
+                <div id="teams-cards-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Teams cards rendered dynamically by main.js -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- TAB 3: PLAYERS VIEW                                               -->
+        <!-- ================================================================= -->
+        <div id="view-players" class="app-tab-view flex-1 hidden p-8 animate-fade-in">
+            <div class="max-w-7xl mx-auto flex flex-col gap-6">
+                <!-- Header -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+                    <div>
+                        <h1 class="heading-font text-3xl font-extrabold text-slate-900">Players Directory</h1>
+                        <p class="text-sm text-slate-500 mt-1">Manage player profiles, jersey numbers, roles, and squad team assignments.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button onclick="openCreatePlayerModal()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-98 transition-all flex items-center gap-2 text-sm whitespace-nowrap">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                            <span>Add Player</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filters & Search Toolbar -->
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                    <div class="flex flex-wrap items-center gap-3 flex-1">
+                        <!-- Search -->
+                        <div class="relative min-w-[240px]">
+                            <input id="players-search-input" oninput="filterPlayers()" type="text" placeholder="Search by name or jersey #..." class="pl-9 pr-4 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500 w-full">
+                            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        </div>
+
+                        <!-- Team Filter -->
+                        <select id="players-filter-team" onchange="filterPlayers()" class="py-2 px-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500 text-slate-700">
+                            <option value="ALL">All Teams</option>
+                        </select>
+
+                        <!-- Role Filter -->
+                        <select id="players-filter-role" onchange="filterPlayers()" class="py-2 px-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500 text-slate-700">
+                            <option value="ALL">All Roles</option>
+                            <option value="BAT">Batsman (BAT)</option>
+                            <option value="BOWL">Bowler (BOWL)</option>
+                            <option value="AR">All-Rounder (AR)</option>
+                            <option value="WK">Wicket Keeper (WK)</option>
+                        </select>
+                    </div>
+
+                    <div class="text-xs font-bold text-slate-500" id="players-count-label">
+                        Showing 0 players
+                    </div>
+                </div>
+
+                <!-- Players Table Container -->
+                <div id="players-list-container" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <!-- Table rendered dynamically by main.js -->
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Dialog Modals will be appended dynamically by JS -->
+    <div id="modal-container"></div>
+    
+    <!-- Floating Toast Feedback Notifications -->
+    <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <script src="main.js"></script>
+</body>
+</html>
