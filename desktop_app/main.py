@@ -34,9 +34,10 @@ def check_over_end():
         state["previous_bowler"] = state["bowler"]["name"]
         
         is_innings_over = False
-        if state.get("innings", 1) == 2 and (state["wickets"] >= 10 or (state.get("target") and state["runs"] >= state["target"])):
+        max_w = state.get("max_wickets", 10)
+        if state.get("innings", 1) == 2 and (state["wickets"] >= max_w or (state.get("target") and state["runs"] >= state["target"])):
             is_innings_over = True
-        elif state.get("innings", 1) == 1 and state["wickets"] >= 10:
+        elif state.get("innings", 1) == 1 and state["wickets"] >= max_w:
             is_innings_over = True
             
         if state["overs_completed"] >= state["max_overs"] or is_innings_over:
@@ -71,7 +72,8 @@ def end_first_innings():
     }
     
     # Reset stats for innings 2
-    state["runs"] = 0
+    pen_runs = state.get("bowling_team_penalty", 0)
+    state["runs"] = pen_runs
     state["wickets"] = 0
     state["overs_completed"] = 0
     state["balls_this_over"] = 0
@@ -81,6 +83,8 @@ def end_first_innings():
     state["bowler_stats"] = {}
     state["out_batsmen"] = []
     state["extras"] = {"wd": 0, "nb": 0, "b": 0, "lb": 0}
+    if pen_runs > 0:
+        state["extras"]["pen"] = pen_runs
     state["bowler_runs_this_over"] = 0
     state["previous_bowler"] = None
     
@@ -108,10 +112,11 @@ def start_innings_2(striker, non_striker, bowler):
     state["non_striker"] = {"name": non_striker, "runs": 0, "balls": 0, "4s": 0, "6s": 0, "status": "not out"}
     state["bowler"] = {"name": bowler, "runs": 0, "overs": 0.0, "wickets": 0, "maidens": 0}
     
-    state["batsmen_stats"][striker] = state["striker"].copy()
+    state.setdefault("batsmen_stats", {})[striker] = state["striker"].copy()
     state["batsmen_stats"][non_striker] = state["non_striker"].copy()
-    state["bowler_stats"][bowler] = state["bowler"].copy()
+    state.setdefault("bowler_stats", {})[bowler] = state["bowler"].copy()
     
+    sync_active_stats()
     ws_manager.send_state(state)
 
 def end_match():
@@ -186,6 +191,7 @@ def start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, o
         "innings": 1,
         "target": None,
         "max_overs": int(overs),
+        "max_wickets": 10,
         "balls_per_over": 6,
         "team_1_name": batName,
         "team_2_name": bowlName,
@@ -215,6 +221,8 @@ def sync_active_stats():
         state["batsmen_stats"][state["striker"]["name"]] = state["striker"].copy()
         state["batsmen_stats"][state["non_striker"]["name"]] = state["non_striker"].copy()
         state["bowler_stats"][state["bowler"]["name"]] = state["bowler"].copy()
+    if state.get("striker") and state.get("non_striker"):
+        state["current_batters"] = [state["striker"]["name"], state["non_striker"]["name"]]
 
 @eel.expose
 def get_state():
@@ -301,10 +309,11 @@ def process_delivery(label, team_runs, bat_runs, bowl_runs, valid_ball, physical
     
     if state.get("match_over"):
         return
+    max_w = state.get("max_wickets", 10)
     if state.get("innings") == 2:
-        if state["wickets"] >= 10 or (state.get("target") and state["runs"] >= state["target"]):
+        if state["wickets"] >= max_w or (state.get("target") and state["runs"] >= state["target"]):
             end_match()
-    elif state.get("innings") == 1 and state["wickets"] >= 10:
+    elif state.get("innings") == 1 and state["wickets"] >= max_w:
         end_first_innings()
 
 @eel.expose
@@ -440,10 +449,163 @@ def score_wicket(method, new_bat_name, physical_runs=0, illegal_delivery="None",
     
     if state.get("match_over"):
         return
+    max_w = state.get("max_wickets", 10)
     if state.get("innings") == 2:
-        if state["wickets"] >= 10 or (state.get("target") and state["runs"] >= state["target"]):
+        if state["wickets"] >= max_w or (state.get("target") and state["runs"] >= state["target"]):
             end_match()
-    elif state.get("innings") == 1 and state["wickets"] >= 10:
+    elif state.get("innings") == 1 and state["wickets"] >= max_w:
+        end_first_innings()
+
+@eel.expose
+def abandon_match():
+    global state
+    if not state:
+        return
+    save_state_for_undo()
+    state["match_over"] = True
+    state["status"] = "ABANDONED"
+    state["abandoned"] = True
+    state["match_result"] = "Match Abandoned"
+    sync_active_stats()
+    ws_manager.send_state(state)
+    eel.showMatchOverPrompt()
+
+@eel.expose
+def end_current_innings():
+    global state
+    if not state or state.get("match_over"):
+        return
+    save_state_for_undo()
+    sync_active_stats()
+    if state.get("innings", 1) == 1:
+        end_first_innings()
+    else:
+        end_match()
+    ws_manager.send_state(state)
+
+@eel.expose
+def award_penalty_runs(team_name):
+    global state
+    if not state or state.get("match_over"):
+        return
+    save_state_for_undo()
+    
+    batting_team = state.get("team_1_name") if state.get("innings", 1) == 1 else state.get("team_2_name")
+    is_batting = (team_name == batting_team)
+    
+    state.setdefault("extras", {}).setdefault("pen", 0)
+    
+    if is_batting:
+        state["runs"] += 5
+        state["extras"]["pen"] += 5
+        state["this_over"].append("5 Pen")
+        
+        if state.get("innings") == 2 and state.get("target") and state["runs"] >= state["target"]:
+            sync_active_stats()
+            ws_manager.send_state(state)
+            end_match()
+            return
+    else:
+        state["this_over"].append(f"5 Pen ({team_name})")
+        if state.get("innings", 1) == 1:
+            state["bowling_team_penalty"] = state.get("bowling_team_penalty", 0) + 5
+        else:
+            if "innings_1_stats" in state:
+                state["innings_1_stats"]["runs"] += 5
+                state["innings_1_stats"].setdefault("extras", {}).setdefault("pen", 0)
+                state["innings_1_stats"]["extras"]["pen"] += 5
+            if state.get("target"):
+                state["target"] += 5
+                
+    sync_active_stats()
+    ws_manager.send_state(state)
+
+@eel.expose
+def retire_hurt(player_type, new_bat_name):
+    global state
+    if not state or state.get("match_over"):
+        return
+    save_state_for_undo()
+    sync_active_stats()
+    
+    clean_name = new_bat_name.strip()
+    if not clean_name:
+        return
+        
+    new_bat = {
+        "name": clean_name,
+        "runs": 0,
+        "balls": 0,
+        "4s": 0,
+        "6s": 0,
+        "status": "not out"
+    }
+    
+    if player_type == "Non-Striker":
+        old_name = state["non_striker"]["name"]
+        if old_name not in state.setdefault("out_batsmen", []):
+            state["out_batsmen"].append(old_name)
+        state["non_striker"]["status"] = "retired hurt"
+        state.setdefault("batsmen_stats", {})[old_name] = state["non_striker"].copy()
+        
+        if clean_name in state.get("batsmen_stats", {}):
+            new_bat = state["batsmen_stats"][clean_name]
+            new_bat["status"] = "not out"
+        state["non_striker"] = new_bat
+        state["batsmen_stats"][clean_name] = new_bat.copy()
+        if clean_name in state.get("out_batsmen", []):
+            state["out_batsmen"].remove(clean_name)
+    else:
+        old_name = state["striker"]["name"]
+        if old_name not in state.setdefault("out_batsmen", []):
+            state["out_batsmen"].append(old_name)
+        state["striker"]["status"] = "retired hurt"
+        state.setdefault("batsmen_stats", {})[old_name] = state["striker"].copy()
+        
+        if clean_name in state.get("batsmen_stats", {}):
+            new_bat = state["batsmen_stats"][clean_name]
+            new_bat["status"] = "not out"
+        state["striker"] = new_bat
+        state["batsmen_stats"][clean_name] = new_bat.copy()
+        if clean_name in state.get("out_batsmen", []):
+            state["out_batsmen"].remove(clean_name)
+        
+    sync_active_stats()
+    ws_manager.send_state(state)
+
+@eel.expose
+def set_target(new_target):
+    global state
+    if not state or state.get("match_over") or state.get("innings", 1) == 1:
+        return
+    save_state_for_undo()
+    state["target"] = int(new_target)
+    sync_active_stats()
+    ws_manager.send_state(state)
+    if state.get("innings") == 2 and state["runs"] >= state["target"]:
+        end_match()
+
+@eel.expose
+def update_match_format(overs, wickets):
+    global state
+    if not state or state.get("innings", 1) == 2 or state.get("match_over"):
+        return
+    current_played_overs = state.get("overs_completed", 0) + (1 if state.get("balls_this_over", 0) > 0 else 0)
+    min_overs = max(1, current_played_overs)
+    if int(overs) < min_overs:
+        print(f"Cannot update format: max overs {overs} is less than current played overs {min_overs}")
+        return
+    current_wickets = state.get("wickets", 0)
+    min_wickets = max(1, current_wickets)
+    if int(wickets) < min_wickets or int(wickets) > 10:
+        print(f"Cannot update format: wickets {wickets} is invalid or less than current wickets {min_wickets}")
+        return
+    save_state_for_undo()
+    state["max_overs"] = int(overs)
+    state["max_wickets"] = int(wickets)
+    sync_active_stats()
+    ws_manager.send_state(state)
+    if state["overs_completed"] >= state["max_overs"] or state["wickets"] >= state["max_wickets"]:
         end_first_innings()
 
 if __name__ == "__main__":

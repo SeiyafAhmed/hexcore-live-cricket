@@ -60,7 +60,7 @@ export default function Scorebug({ state }: { state: MatchState }) {
 
         {/* Batters */}
         <div className="flex flex-col border-l border-white/20 pl-6 gap-1 min-w-[150px]">
-          {state.current_batters.slice(0, 2).map((batter, idx) => (
+          {(state.current_batters || []).slice(0, 2).map((batter, idx) => (
             <div key={idx} className={`text-sm font-medium ${idx === 0 ? 'text-white' : 'text-zinc-400'}`}>
               {batter}{idx === 0 && '*'}
             </div>
@@ -73,7 +73,7 @@ export default function Scorebug({ state }: { state: MatchState }) {
             Bowler
           </div>
           <div className="text-sm font-medium text-white">
-            {state.bowler}
+            {typeof state.bowler === 'object' && state.bowler !== null ? (state.bowler as any).name : (state.bowler || '')}
           </div>
         </div>
         

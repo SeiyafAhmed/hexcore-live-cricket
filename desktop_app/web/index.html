@@ -247,7 +247,7 @@
             </div>
             
             <!-- Match Summary Screen -->
-            <div id="match-summary-screen" class="hidden min-h-screen bg-gray-50 flex flex-col relative pb-16">
+            <div id="match-summary-screen" class="hidden min-h-screen bg-slate-50 flex flex-col relative pb-16">
                 <!-- Dynamically populated by main.js -->
             </div>
 
@@ -292,24 +292,26 @@
 
                     <!-- Active Players -->
                     <div class="flex flex-col gap-1.5">
-                        <div class="flex justify-between items-center bg-[#258a43] text-white px-3.5 py-2.5 rounded-xl font-bold shadow-sm">
+                        <div id="striker-card" class="flex justify-between items-center bg-[#258a43] text-white px-3.5 py-2.5 rounded-xl font-bold shadow-sm transition-all">
                             <div class="flex items-center gap-2">
-                                <span class="w-2 h-2 rounded-full bg-emerald-200 animate-pulse"></span>
+                                <span class="w-2 h-2 rounded-full bg-white/80 animate-pulse"></span>
                                 <span id="striker-name">Batsman 1</span>
                             </div>
-                            <div id="striker-score" class="text-lg">0 <span class="text-xs font-normal text-emerald-100">(0)</span></div>
+                            <div id="striker-score" class="text-lg">0 <span class="text-xs font-normal opacity-85">(0)</span></div>
                         </div>
-                        <div class="flex justify-between items-center bg-slate-200 text-slate-900 px-3.5 py-2.5 rounded-xl font-bold">
-                            <div id="nonstriker-name">Batsman 3</div>
+                        <div id="nonstriker-card" class="flex justify-between items-center bg-slate-200 text-slate-900 px-3.5 py-2.5 rounded-xl font-bold transition-all">
+                            <div class="flex items-center gap-2">
+                                <span id="nonstriker-name">Batsman 3</span>
+                            </div>
                             <div id="nonstriker-score" class="text-lg">0 <span class="text-xs font-normal text-slate-600">(0)</span></div>
                         </div>
                         <div class="flex justify-between items-center bg-emerald-50 border border-emerald-200 text-emerald-950 px-3.5 py-2 rounded-xl font-bold">
                             <div>Extras</div>
-                            <div id="extras-summary" class="text-xs font-semibold">0 (Wd 0, Nb 0, LB 0)</div>
+                            <div id="extras-summary" class="text-xs font-semibold">0 (Wd 0, Nb 0, B 0, LB 0)</div>
                         </div>
-                        <div class="flex justify-between items-center bg-[#1e293b] text-white px-3.5 py-2.5 rounded-xl font-bold shadow-sm">
+                        <div id="bowler-card" class="flex justify-between items-center bg-[#1e293b] text-white px-3.5 py-2.5 rounded-xl font-bold shadow-sm transition-all">
                             <div class="flex items-center gap-2">
-                                <span class="text-xs bg-slate-700 px-1.5 py-0.5 rounded text-slate-300">BOWL</span>
+                                <span class="text-xs bg-slate-700 px-1.5 py-0.5 rounded text-slate-300 font-bold" id="bowler-badge">BOWL</span>
                                 <span id="bowler-name">Bowler 2</span>
                             </div>
                             <div id="bowler-score" class="text-lg">0-0 <span class="text-xs font-normal text-slate-300">(0.0)</span></div>
@@ -345,9 +347,9 @@
                             <div onclick="scoreExtra('Nb')" class="grid-button bg-[#fcbf00] text-black">Nb</div>
                             <div onclick="scoreExtra('Byes')" class="grid-button bg-[#00adef] text-sm">Byes</div>
                             <div onclick="scoreExtra('LB')" class="grid-button bg-[#00adef]">LB</div>
-                            <div onclick="scoreExtra('5678')" class="grid-button bg-[#f58133] text-sm">5678</div>
+                            <div onclick="show5789Modal()" class="grid-button bg-[#f58133] text-sm font-bold">5789</div>
                             <div onclick="scoreExtra('bonus')" class="grid-button bg-[#8c1682] text-sm">bonus</div>
-                            <div onclick="scoreExtra('More')" class="grid-button bg-black text-sm">More</div>
+                            <div onclick="showMoreOptionsModal()" class="grid-button bg-black text-sm">More</div>
                         </div>
                     </div>
 
@@ -356,53 +358,77 @@
                 <!-- RIGHT COLUMN: Scorecard -->
                 <div class="flex flex-col gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80">
                     
-                    <div class="flex font-bold text-base rounded-xl overflow-hidden shadow-sm">
-                        <div class="flex-1 px-5 py-3 bg-[#c8c9cc] text-slate-800 cursor-pointer select-none transition-all flex items-center justify-between" id="tab-team1" onclick="switchScorecardTab(1)">
+                    <!-- Segmented Scorecard Tabs -->
+                    <div class="flex p-1.5 bg-slate-100 rounded-2xl gap-1.5 border border-slate-200/60 shadow-inner" id="scorecard-tabs-container">
+                        <button id="tab-team1" onclick="switchScorecardTab(1)" class="flex-1 px-4 py-2.5 rounded-xl cursor-pointer select-none font-bold flex items-center justify-between transition-all">
                             <span>Team A</span>
                             <span class="text-xs font-semibold px-2 py-0.5 rounded bg-black/10">Innings 1</span>
-                        </div>
-                        <div class="flex-1 px-5 py-3 bg-[#258a43] text-white cursor-pointer select-none transition-all flex items-center justify-between" id="tab-team2" onclick="switchScorecardTab(2)">
+                        </button>
+                        <button id="tab-team2" onclick="switchScorecardTab(2)" class="flex-1 px-4 py-2.5 rounded-xl cursor-pointer select-none font-bold flex items-center justify-between transition-all">
                             <span class="text-xs font-semibold px-2 py-0.5 rounded bg-white/20">Innings 2</span>
                             <span>Team B</span>
-                        </div>
+                        </button>
                     </div>
 
-                    <table class="w-full text-sm mt-1">
-                        <thead>
-                            <tr class="border-b-2 border-slate-200 text-slate-600 font-bold uppercase text-xs">
-                                <th class="text-left py-2.5">Batting</th>
-                                <th class="text-center w-10">R</th>
-                                <th class="text-center w-10">B</th>
-                                <th class="text-center w-10">4s</th>
-                                <th class="text-center w-10">6s</th>
-                                <th class="text-center w-14">S/R</th>
-                            </tr>
-                        </thead>
-                        <tbody id="batting-table-body" class="divide-y divide-slate-100">
-                            <!-- Javascript will inject rows -->
-                        </tbody>
-                    </table>
+                    <!-- Dynamic Innings Status Banner -->
+                    <div id="scorecard-innings-banner" class="flex items-center justify-between p-3.5 rounded-xl border transition-all shadow-2xs">
+                        <!-- Populated dynamically: Team Logo, Name, Score, Overs, Run Rate -->
+                    </div>
+
+                    <!-- Batting Table Section -->
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-200 text-slate-400 font-bold uppercase text-[11px] tracking-wider">
+                                    <th class="text-left py-2.5 pl-3">Batter</th>
+                                    <th class="text-center w-12">R</th>
+                                    <th class="text-center w-12">B</th>
+                                    <th class="text-center w-10">4s</th>
+                                    <th class="text-center w-10">6s</th>
+                                    <th class="text-center w-14 pr-3">SR</th>
+                                </tr>
+                            </thead>
+                            <tbody id="batting-table-body" class="divide-y divide-slate-100">
+                                <!-- Javascript will inject rows -->
+                            </tbody>
+                        </table>
+                    </div>
                     
-                    <div class="mt-2 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
-                        <div class="font-bold text-slate-700 uppercase tracking-wider text-[11px]">Yet to bat</div>
-                        <div class="text-slate-500 mt-1 font-medium" id="yet-to-bat"></div>
+                    <!-- Yet to Bat -->
+                    <div class="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+                        <div class="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                            <span class="flex items-center gap-1.5">
+                                <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                                Yet to bat
+                            </span>
+                            <span id="yet-to-bat-count" class="text-slate-400 font-medium normal-case"></span>
+                        </div>
+                        <div class="text-slate-600 font-medium" id="yet-to-bat"></div>
                     </div>
 
-                    <table class="w-full text-sm mt-4">
-                        <thead>
-                            <tr class="border-b-2 border-slate-200 text-slate-600 font-bold uppercase text-xs">
-                                <th class="text-left py-2.5">Bowling</th>
-                                <th class="text-center w-10">O</th>
-                                <th class="text-center w-10">M</th>
-                                <th class="text-center w-10">R</th>
-                                <th class="text-center w-10">W</th>
-                                <th class="text-center w-14">Econ</th>
-                            </tr>
-                        </thead>
-                        <tbody id="bowling-table-body" class="divide-y divide-slate-100">
-                            <!-- Javascript will inject rows -->
-                        </tbody>
-                    </table>
+                    <!-- Bowling Table Section -->
+                    <div class="overflow-x-auto mt-1">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-200 text-slate-400 font-bold uppercase text-[11px] tracking-wider">
+                                    <th class="text-left py-2.5 pl-3" id="bowling-table-header">Bowler</th>
+                                    <th class="text-center w-12">O</th>
+                                    <th class="text-center w-10">M</th>
+                                    <th class="text-center w-12">R</th>
+                                    <th class="text-center w-12">W</th>
+                                    <th class="text-center w-14 pr-3">Econ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bowling-table-body" class="divide-y divide-slate-100">
+                                <!-- Javascript will inject rows -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Scorecard Footer Summary -->
+                    <div id="scorecard-footer-summary" class="mt-auto pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
+                        <!-- Extras and match summary -->
+                    </div>
                     
                 </div>
             </div>

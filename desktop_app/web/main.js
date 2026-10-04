@@ -104,28 +104,166 @@ async function startMatch() {
     refreshUI();
 }
 
+// ---------------------------------------------------------------------------
+// Color & Theme Utilities
+// ---------------------------------------------------------------------------
+function hexToRgba(hex, alpha = 1) {
+    if (!hex || typeof hex !== 'string') return `rgba(15, 23, 42, ${alpha})`;
+    let clean = hex.trim().replace('#', '');
+    if (clean.length === 3) clean = clean.split('').map(c => c + c).join('');
+    if (clean.length !== 6) return `rgba(15, 23, 42, ${alpha})`;
+    let num = parseInt(clean, 16);
+    let r = (num >> 16) & 255;
+    let g = (num >> 8) & 255;
+    let b = num & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function getContrastColor(hex) {
+    if (!hex || typeof hex !== 'string') return '#ffffff';
+    let clean = hex.trim().replace('#', '');
+    if (clean.length === 3) clean = clean.split('').map(c => c + c).join('');
+    if (clean.length !== 6) return '#ffffff';
+    let num = parseInt(clean, 16);
+    let r = (num >> 16) & 255;
+    let g = (num >> 8) & 255;
+    let b = num & 255;
+    let brightness = Math.sqrt(0.299 * (r * r) + 0.587 * (g * g) + 0.114 * (b * b));
+    return brightness > 155 ? '#0f172a' : '#ffffff';
+}
+
+function adjustBrightness(hex, percent) {
+    if (!hex || typeof hex !== 'string') return '#0f172a';
+    let clean = hex.trim().replace('#', '');
+    if (clean.length === 3) clean = clean.split('').map(c => c + c).join('');
+    if (clean.length !== 6) return hex;
+    let num = parseInt(clean, 16);
+    let r = Math.min(255, Math.max(0, Math.round(((num >> 16) & 255) * (1 + percent / 100))));
+    let g = Math.min(255, Math.max(0, Math.round(((num >> 8) & 255) * (1 + percent / 100))));
+    let b = Math.min(255, Math.max(0, Math.round((num & 255) * (1 + percent / 100))));
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
+function getTeamTheme(meta, teamName, defaultColor = '#0f547c') {
+    let team = (meta && Array.isArray(meta.teams)) ? meta.teams.find(t => t && t.name === teamName) : null;
+    let color = (team && team.theme_color && team.theme_color.startsWith('#')) ? team.theme_color : defaultColor;
+    return {
+        team: team,
+        name: teamName || 'Team',
+        color: color,
+        darkColor: adjustBrightness(color, -25),
+        lightColor: adjustBrightness(color, 25),
+        textColor: getContrastColor(color),
+        logo: team ? team.logo : null
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Text & Cricket Notation Utilities
+// ---------------------------------------------------------------------------
+function toTitleCase(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str.toLowerCase().replace(/(?:^|\s|-|\.)\S/g, function(a) {
+        return a.toUpperCase();
+    });
+}
+
+function formatDismissal(status) {
+    if (!status || typeof status !== 'string') return 'out';
+    let s = status.trim();
+    if (!s || s.toLowerCase() === 'not out') return 'not out';
+    if (s.toLowerCase() === 'retired hurt') return 'retired hurt';
+    
+    // c & b Bowler Name
+    let cbMatch = s.match(/^c\s*&\s*b\s+(.*)$/i);
+    if (cbMatch) {
+        return `c & b ${toTitleCase(cbMatch[1])}`;
+    }
+    
+    // c Fielder Name b Bowler Name
+    let cMatch = s.match(/^c\s+(.*?)\s+b\s+(.*)$/i);
+    if (cMatch) {
+        return `c ${toTitleCase(cMatch[1])} b ${toTitleCase(cMatch[2])}`;
+    }
+    
+    // st Fielder Name b Bowler Name
+    let stMatch = s.match(/^st\s+(.*?)\s+b\s+(.*)$/i);
+    if (stMatch) {
+        return `st ${toTitleCase(stMatch[1])} b ${toTitleCase(stMatch[2])}`;
+    }
+    
+    // lbw b Bowler Name or lbw Bowler Name
+    let lbwMatch = s.match(/^lbw(?:\s+b)?\s+(.*)$/i);
+    if (lbwMatch) {
+        return `lbw b ${toTitleCase(lbwMatch[1])}`;
+    }
+    
+    // b Bowler Name
+    let bMatch = s.match(/^b\s+(.*)$/i);
+    if (bMatch) {
+        return `b ${toTitleCase(bMatch[1])}`;
+    }
+    
+    // run out (Fielder Name) or run out
+    let roMatch = s.match(/^run\s*out(?:\s*\((.*?)\))?$/i);
+    if (roMatch) {
+        return roMatch[1] ? `run out (${toTitleCase(roMatch[1])})` : 'run out';
+    }
+    
+    // hit wicket b Bowler Name
+    let hwMatch = s.match(/^hit\s*wicket(?:\s+b)?\s+(.*)$/i);
+    if (hwMatch) {
+        return `hit wicket b ${toTitleCase(hwMatch[1])}`;
+    }
+    
+    // out (method)
+    let outMatch = s.match(/^out\s*\((.*?)\)$/i);
+    if (outMatch) {
+        return `out (${outMatch[1].toLowerCase()})`;
+    }
+    
+    return s.toLowerCase();
+}
+
 let teamCache = null;
 let playerCache = {};
 
 async function populateImageCaches(state) {
-    if (!teamCache) teamCache = await eel.get_teams()();
-    
-    let batTeamId = state.batting_team_id;
-    let bowlTeamId = state.bowling_team_id;
-    if (!batTeamId || !bowlTeamId) {
-        let batTeam = teamCache.find(t => t.name === (state.innings === 1 ? state.team_1_name : state.team_2_name));
-        let bowlTeam = teamCache.find(t => t.name === (state.innings === 1 ? state.team_2_name : state.team_1_name));
-        if (batTeam) batTeamId = batTeam.id;
-        if (bowlTeam) bowlTeamId = bowlTeam.id;
+    try {
+        if (!teamCache || !Array.isArray(teamCache)) {
+            let res = await eel.get_teams()();
+            teamCache = Array.isArray(res) ? res : [];
+        }
+        
+        let batTeamId = state.batting_team_id;
+        let bowlTeamId = state.bowling_team_id;
+        if (!batTeamId || !bowlTeamId) {
+            let batTeam = teamCache.find(t => t && t.name === (state.innings === 1 ? state.team_1_name : state.team_2_name));
+            let bowlTeam = teamCache.find(t => t && t.name === (state.innings === 1 ? state.team_2_name : state.team_1_name));
+            if (batTeam) batTeamId = batTeam.id;
+            if (bowlTeam) bowlTeamId = bowlTeam.id;
+        }
+        
+        if (batTeamId && !playerCache[batTeamId]) {
+            let pRes = await eel.get_players(batTeamId)();
+            playerCache[batTeamId] = Array.isArray(pRes) ? pRes : [];
+        }
+        if (bowlTeamId && !playerCache[bowlTeamId]) {
+            let pRes = await eel.get_players(bowlTeamId)();
+            playerCache[bowlTeamId] = Array.isArray(pRes) ? pRes : [];
+        }
+        
+        let p1 = Array.isArray(playerCache[batTeamId]) ? playerCache[batTeamId] : [];
+        let p2 = Array.isArray(playerCache[bowlTeamId]) ? playerCache[bowlTeamId] : [];
+        
+        return {
+            teams: teamCache || [],
+            players: [...p1, ...p2]
+        };
+    } catch (err) {
+        console.error("Error in populateImageCaches:", err);
+        return { teams: teamCache || [], players: [] };
     }
-    
-    if (batTeamId && !playerCache[batTeamId]) playerCache[batTeamId] = await eel.get_players(batTeamId)();
-    if (bowlTeamId && !playerCache[bowlTeamId]) playerCache[bowlTeamId] = await eel.get_players(bowlTeamId)();
-    
-    return {
-        teams: teamCache,
-        players: [...(playerCache[batTeamId] || []), ...(playerCache[bowlTeamId] || [])]
-    };
 }
 
 let activeScorecardTab = null;
@@ -140,112 +278,217 @@ async function refreshUI() {
     let state = await eel.get_state()();
     let meta = await populateImageCaches(state);
     
-    if (state.innings !== lastSeenInnings) {
-        activeScorecardTab = state.innings;
+    if (!activeScorecardTab || state.innings !== lastSeenInnings) {
+        activeScorecardTab = state.innings || 1;
         lastSeenInnings = state.innings;
     }
     
-    let swap = false;
+    // Resolve dynamic theme colors for both teams
+    let t1Theme = getTeamTheme(meta, state.team_1_name, '#0f547c');
+    let t2Theme = getTeamTheme(meta, state.team_2_name, '#059669');
+    
+    let currentBattingTheme = (state.innings === 1) ? t1Theme : t2Theme;
+    let currentBowlingTheme = (state.innings === 1) ? t2Theme : t1Theme;
+    let tabBattingTheme = (activeScorecardTab === 1) ? t1Theme : t2Theme;
+    let tabBowlingTheme = (activeScorecardTab === 1) ? t2Theme : t1Theme;
     
     let leftName = state.team_1_name;
     let rightName = state.team_2_name;
     let leftScore = state.innings === 1 ? `${state.runs}/${state.wickets}` : (state.innings_1_stats ? `${state.innings_1_stats.runs}/${state.innings_1_stats.wickets}` : "0/0");
-    let rightScore = state.innings === 1 ? "0/0" : `${state.runs}/${state.wickets}`;
+    let rightScore = state.innings === 1 ? (state.bowling_team_penalty ? `${state.bowling_team_penalty}/0` : "0/0") : `${state.runs}/${state.wickets}`;
     let leftOvers = state.innings === 1 ? `(${state.overs_completed}.${state.balls_this_over})` : (state.innings_1_stats ? `(${state.innings_1_stats.overs_completed}.${state.innings_1_stats.balls_this_over})` : "(0.0)");
     let rightOvers = state.innings === 1 ? "(0.0)" : `(${state.overs_completed}.${state.balls_this_over})`;
     
     // Header updates
-    document.getElementById("team1-name").innerText = leftName;
-    document.getElementById("team2-name").innerText = rightName;
+    let elT1Name = document.getElementById("team1-name");
+    if (elT1Name) elT1Name.innerText = leftName;
+    let elT2Name = document.getElementById("team2-name");
+    if (elT2Name) elT2Name.innerText = rightName;
     
-    let tLeft = meta.teams.find(t => t.name === leftName);
-    if (tLeft && tLeft.logo) {
-        document.getElementById("team1-img").src = tLeft.logo;
-        document.getElementById("team1-img").classList.remove("hidden");
-        document.getElementById("team1-placeholder").classList.add("hidden");
-    } else {
-        document.getElementById("team1-img").classList.add("hidden");
-        document.getElementById("team1-placeholder").classList.remove("hidden");
+    let tLeft = (meta.teams && Array.isArray(meta.teams)) ? meta.teams.find(t => t && t.name === leftName) : null;
+    let elT1Img = document.getElementById("team1-img");
+    let elT1Ph = document.getElementById("team1-placeholder");
+    if (tLeft && tLeft.logo && elT1Img && elT1Ph) {
+        elT1Img.src = tLeft.logo;
+        elT1Img.classList.remove("hidden");
+        elT1Ph.classList.add("hidden");
+    } else if (elT1Img && elT1Ph) {
+        elT1Img.classList.add("hidden");
+        elT1Ph.classList.remove("hidden");
+        elT1Ph.style.backgroundColor = t1Theme.color;
+        elT1Ph.innerText = (state.team_1_name || 'T1').charAt(0);
     }
     
-    let tRight = meta.teams.find(t => t.name === rightName);
-    if (tRight && tRight.logo) {
-        document.getElementById("team2-img").src = tRight.logo;
-        document.getElementById("team2-img").classList.remove("hidden");
-        document.getElementById("team2-placeholder").classList.add("hidden");
-    } else {
-        document.getElementById("team2-img").classList.add("hidden");
-        document.getElementById("team2-placeholder").classList.remove("hidden");
+    let tRight = (meta.teams && Array.isArray(meta.teams)) ? meta.teams.find(t => t && t.name === rightName) : null;
+    let elT2Img = document.getElementById("team2-img");
+    let elT2Ph = document.getElementById("team2-placeholder");
+    if (tRight && tRight.logo && elT2Img && elT2Ph) {
+        elT2Img.src = tRight.logo;
+        elT2Img.classList.remove("hidden");
+        elT2Ph.classList.add("hidden");
+    } else if (elT2Img && elT2Ph) {
+        elT2Img.classList.add("hidden");
+        elT2Ph.classList.remove("hidden");
+        elT2Ph.style.backgroundColor = t2Theme.color;
+        elT2Ph.innerText = (state.team_2_name || 'T2').charAt(0);
     }
     
-    document.getElementById("team1-score").innerText = leftScore;
-    document.getElementById("team2-score").innerText = rightScore;
-    document.getElementById("team1-overs").innerText = leftOvers;
-    document.getElementById("team2-overs").innerText = rightOvers;
+    let elT1Score = document.getElementById("team1-score");
+    if (elT1Score) elT1Score.innerText = leftScore;
+    let elT2Score = document.getElementById("team2-score");
+    if (elT2Score) elT2Score.innerText = rightScore;
+    let elT1Overs = document.getElementById("team1-overs");
+    if (elT1Overs) elT1Overs.innerText = leftOvers;
+    let elT2Overs = document.getElementById("team2-overs");
+    if (elT2Overs) elT2Overs.innerText = rightOvers;
     
-    document.getElementById("match-max-overs").innerText = `${state.max_overs} Overs`;
+    let elMaxOvers = document.getElementById("match-max-overs");
+    if (elMaxOvers) elMaxOvers.innerText = `${state.max_overs} Overs`;
     
-    document.getElementById("tab-team1").innerText = state.team_1_name || "Team A";
-    document.getElementById("tab-team2").innerText = state.team_2_name || "Team B";
-    
-    if (activeScorecardTab === 1) {
-        document.getElementById("tab-team1").className = "flex-1 px-4 py-2 bg-[#258a43] text-white cursor-pointer select-none";
-        document.getElementById("tab-team2").className = "flex-1 px-4 py-2 bg-[#c8c9cc] text-black text-right cursor-pointer select-none";
-    } else {
-        document.getElementById("tab-team1").className = "flex-1 px-4 py-2 bg-[#c8c9cc] text-black cursor-pointer select-none";
-        document.getElementById("tab-team2").className = "flex-1 px-4 py-2 bg-[#258a43] text-white text-right cursor-pointer select-none";
+    // Dynamic Scorecard Tabs using team theme colors
+    let tab1El = document.getElementById("tab-team1");
+    let tab2El = document.getElementById("tab-team2");
+    if (tab1El && tab2El) {
+        if (activeScorecardTab === 1) {
+            tab1El.style.background = `linear-gradient(135deg, ${t1Theme.color}, ${t1Theme.darkColor})`;
+            tab1El.style.color = t1Theme.textColor;
+            tab1El.style.boxShadow = `0 4px 14px ${hexToRgba(t1Theme.color, 0.32)}`;
+            tab1El.className = "flex-1 px-4 py-2.5 rounded-xl cursor-pointer select-none font-bold flex items-center justify-between transition-all transform active:scale-98 shadow-sm";
+            tab1El.innerHTML = `
+                <div class="flex items-center gap-2">
+                    ${t1Theme.logo ? `<img src="${t1Theme.logo}" class="w-5 h-5 rounded-full object-contain bg-white/20 p-0.5">` : `<span class="w-2.5 h-2.5 rounded-full bg-white/80"></span>`}
+                    <span class="tracking-tight text-sm">${state.team_1_name || "Team 1"}</span>
+                </div>
+                <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-xs">1st Inn</span>
+            `;
+            
+            tab2El.style.background = 'transparent';
+            tab2El.style.color = '#475569';
+            tab2El.style.boxShadow = 'none';
+            tab2El.className = "flex-1 px-4 py-2.5 rounded-xl hover:bg-slate-200/60 cursor-pointer select-none font-bold flex items-center justify-between transition-all";
+            tab2El.innerHTML = `
+                <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">2nd Inn</span>
+                <div class="flex items-center gap-2">
+                    <span class="tracking-tight text-sm">${state.team_2_name || "Team 2"}</span>
+                    <span class="w-3 h-3 rounded-full border border-slate-300 shadow-2xs" style="background: ${t2Theme.color};"></span>
+                </div>
+            `;
+        } else {
+            tab2El.style.background = `linear-gradient(135deg, ${t2Theme.color}, ${t2Theme.darkColor})`;
+            tab2El.style.color = t2Theme.textColor;
+            tab2El.style.boxShadow = `0 4px 14px ${hexToRgba(t2Theme.color, 0.32)}`;
+            tab2El.className = "flex-1 px-4 py-2.5 rounded-xl cursor-pointer select-none font-bold flex items-center justify-between transition-all transform active:scale-98 shadow-sm";
+            tab2El.innerHTML = `
+                <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-xs">2nd Inn</span>
+                <div class="flex items-center gap-2">
+                    <span class="tracking-tight text-sm">${state.team_2_name || "Team 2"}</span>
+                    ${t2Theme.logo ? `<img src="${t2Theme.logo}" class="w-5 h-5 rounded-full object-contain bg-white/20 p-0.5">` : `<span class="w-2.5 h-2.5 rounded-full bg-white/80"></span>`}
+                </div>
+            `;
+            
+            tab1El.style.background = 'transparent';
+            tab1El.style.color = '#475569';
+            tab1El.style.boxShadow = 'none';
+            tab1El.className = "flex-1 px-4 py-2.5 rounded-xl hover:bg-slate-200/60 cursor-pointer select-none font-bold flex items-center justify-between transition-all";
+            tab1El.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full border border-slate-300 shadow-2xs" style="background: ${t1Theme.color};"></span>
+                    <span class="tracking-tight text-sm">${state.team_1_name || "Team 1"}</span>
+                </div>
+                <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">1st Inn</span>
+            `;
+        }
     }
     
     // RR / Target
     let bpo = state.balls_per_over || 6;
     let total_balls = (state.overs_completed * bpo) + state.balls_this_over;
     let rr = total_balls > 0 ? (state.runs / total_balls * bpo) : 0;
-    document.getElementById("lbl-rr").innerText = `RR: ${rr.toFixed(2)}`;
+    let elRR = document.getElementById("lbl-rr");
+    if (elRR) elRR.innerText = `RR: ${rr.toFixed(2)}`;
     
+    let elTarget = document.getElementById("lbl-target");
+    let elRRR = document.getElementById("lbl-rrr");
+    let elEquation = document.getElementById("lbl-equation");
     if (state.target) {
-        document.getElementById("lbl-target").innerText = `Target: ${state.target}`;
-        let runs_needed = state.target - state.runs;
-        let balls_rem = (state.max_overs * bpo) - total_balls;
-        let rrr = balls_rem > 0 ? (runs_needed / balls_rem * bpo) : 0;
-        document.getElementById("lbl-rrr").innerText = `RRR: ${rrr.toFixed(2)}`;
-        
-        document.getElementById("lbl-equation").innerText = `${state.team_2_name} need ${runs_needed} runs from ${balls_rem} balls`;
+        if (elTarget) elTarget.innerText = `Target: ${state.target}`;
+        if (state.innings === 2) {
+            let runs_needed = state.target - state.runs;
+            let balls_rem = (state.max_overs * bpo) - total_balls;
+            let rrr = balls_rem > 0 ? (runs_needed / balls_rem * bpo) : 0;
+            if (elRRR) elRRR.innerText = `RRR: ${rrr.toFixed(2)}`;
+            let chaseTeam = state.team_2_name || "Team 2";
+            if (elEquation) {
+                if (runs_needed > 0 && balls_rem > 0) {
+                    elEquation.innerText = `${chaseTeam} need ${runs_needed} runs from ${balls_rem} balls`;
+                } else if (runs_needed <= 0) {
+                    elEquation.innerText = `${chaseTeam} won the match!`;
+                } else {
+                    elEquation.innerText = `Innings over`;
+                }
+            }
+        } else {
+            if (elRRR) elRRR.innerText = "";
+            if (elEquation) elEquation.innerText = `Target set to ${state.target} runs`;
+        }
     } else {
-        document.getElementById("lbl-equation").innerText = "";
+        if (elTarget) elTarget.innerText = "";
+        if (elRRR) elRRR.innerText = "";
+        if (elEquation) elEquation.innerText = "";
     }
     
-    let updatePlayerImg = (imgId, playerName) => {
-        let p = meta.players.find(x => (x.full_name || x.first_name + " " + x.last_name) === playerName);
-        let el = document.getElementById(imgId);
-        if (p && p.image) {
-            el.src = p.image;
-            el.classList.remove("hidden");
-        } else {
-            el.classList.add("hidden");
-        }
-    };
+    // Active players - with defensive null checks for innings transitions & concluded games
+    let strName = state.striker ? state.striker.name : "-";
+    let strRuns = state.striker ? state.striker.runs : 0;
+    let strBalls = state.striker ? state.striker.balls : 0;
+    let elStrName = document.getElementById("striker-name");
+    if (elStrName) elStrName.innerText = state.striker ? (toTitleCase(strName) + " *") : "-";
+    let elStrScore = document.getElementById("striker-score");
+    if (elStrScore) elStrScore.innerHTML = state.striker ? `${strRuns} <span class="text-xs font-normal opacity-90">(${strBalls})</span>` : "-";
     
-    // Active players
-    document.getElementById("striker-name").innerText = state.striker.name + " *";
-    document.getElementById("striker-score").innerHTML = `${state.striker.runs} <span class="text-xs font-normal">(${state.striker.balls})</span>`;
+    // Style active striker card with current batting team's theme color
+    let elStrikerCard = document.getElementById("striker-card");
+    if (elStrikerCard && state.striker) {
+        elStrikerCard.style.background = `linear-gradient(135deg, ${currentBattingTheme.color}, ${currentBattingTheme.darkColor})`;
+        elStrikerCard.style.color = currentBattingTheme.textColor;
+        elStrikerCard.style.boxShadow = `0 4px 14px ${hexToRgba(currentBattingTheme.color, 0.28)}`;
+    }
     
-    document.getElementById("nonstriker-name").innerText = state.non_striker.name;
-    document.getElementById("nonstriker-score").innerHTML = `${state.non_striker.runs} <span class="text-xs font-normal">(${state.non_striker.balls})</span>`;
+    let nstrName = state.non_striker ? state.non_striker.name : "-";
+    let nstrRuns = state.non_striker ? state.non_striker.runs : 0;
+    let nstrBalls = state.non_striker ? state.non_striker.balls : 0;
+    let elNstrName = document.getElementById("nonstriker-name");
+    if (elNstrName) elNstrName.innerText = state.non_striker ? toTitleCase(nstrName) : "-";
+    let elNstrScore = document.getElementById("nonstriker-score");
+    if (elNstrScore) elNstrScore.innerHTML = state.non_striker ? `${nstrRuns} <span class="text-xs font-normal text-slate-500">(${nstrBalls})</span>` : "-";
     
-    document.getElementById("bowler-name").innerText = state.bowler.name;
-    document.getElementById("bowler-score").innerHTML = `${state.bowler.runs}-${state.bowler.wickets} <span class="text-xs font-normal">(${state.bowler.overs})</span>`;
+    let bwlObj = (state.bowler && typeof state.bowler === 'object') ? state.bowler : { name: state.bowler || "-", runs: 0, wickets: 0, overs: 0 };
+    let bowlName = bwlObj.name || "-";
+    let bowlRuns = bwlObj.runs || 0;
+    let bowlWkts = bwlObj.wickets || 0;
+    let bowlOvers = bwlObj.overs || 0;
+    let elBwlName = document.getElementById("bowler-name");
+    if (elBwlName) elBwlName.innerText = (bwlObj.name && bwlObj.name !== "-") ? toTitleCase(bowlName) : "-";
+    let elBwlScore = document.getElementById("bowler-score");
+    if (elBwlScore) elBwlScore.innerHTML = (bwlObj.name && bwlObj.name !== "-") ? `${bowlRuns}-${bowlWkts} <span class="text-xs font-normal text-slate-300">(${bowlOvers})</span>` : "-";
+    
+    let elBowlerBadge = document.getElementById("bowler-badge");
+    if (elBowlerBadge) {
+        elBowlerBadge.style.background = hexToRgba(currentBowlingTheme.color, 0.4);
+    }
     
     let targetState = state;
     if (activeScorecardTab !== state.innings) {
         if (activeScorecardTab === 1 && state.innings_1_stats) {
             targetState = state.innings_1_stats;
-        } else if (activeScorecardTab === 2 && state.innings === 1) {
+        } else if (activeScorecardTab === 2 && (state.innings || 1) === 1) {
             targetState = {
                 batting_team_id: state.bowling_team_id,
                 batsmen_stats: {},
                 bowler_stats: {},
                 extras: {wd:0, nb:0, b:0, lb:0},
                 this_over: [],
+                past_overs: [],
                 out_batsmen: []
             };
         }
@@ -253,100 +496,295 @@ async function refreshUI() {
     
     // Extras
     let ex = targetState.extras || {wd:0, nb:0, b:0, lb:0};
-    let exTotal = ex.wd + ex.nb + ex.b + ex.lb;
-    document.getElementById("extras-summary").innerText = `${exTotal} (Wd ${ex.wd}, Nb ${ex.nb}, B ${ex.b}, LB ${ex.lb})`;
-    
-    // Recent Balls (only show for current active innings)
-    let recentHTML = "";
-    if (targetState.this_over) {
-        targetState.this_over.forEach(b => {
-            let bg = "bg-white text-black border-gray-400 border";
-            if(b.includes("W") && !b.includes("Wd")) bg = "bg-[#cc0000] text-white";
-            recentHTML += `<div class="min-w-[2rem] px-1 w-auto h-8 flex items-center justify-center font-bold rounded ${bg}">${b}</div>`;
-        });
+    let exTotal = (ex.wd || 0) + (ex.nb || 0) + (ex.b || 0) + (ex.lb || 0) + (ex.pen || 0);
+    let penText = ex.pen ? `, Pen ${ex.pen}` : '';
+    let elExtras = document.getElementById("extras-summary");
+    if (elExtras) {
+        elExtras.innerText = `${exTotal} (Wd ${ex.wd || 0}, Nb ${ex.nb || 0}, B ${ex.b || 0}, LB ${ex.lb || 0}${penText})`;
     }
-    document.getElementById("recent-balls").innerHTML = recentHTML;
+    
+    // Recent Balls
+    let recentHTML = "";
+    if (targetState.this_over && targetState.this_over.length > 0) {
+        targetState.this_over.forEach(b => {
+            let bStr = String(b);
+            let bg = "bg-white text-slate-800 border-slate-300 border shadow-xs";
+            if (bStr.includes("W") && !bStr.includes("Wd")) bg = "bg-[#cc0000] text-white border-red-700 shadow-sm font-black";
+            else if (bStr.includes("4")) bg = "bg-blue-600 text-white border-blue-700 shadow-sm font-black";
+            else if (bStr.includes("6")) bg = "bg-emerald-600 text-white border-emerald-700 shadow-sm font-black";
+            else if (bStr.includes("Pen")) bg = "bg-purple-600 text-white border-purple-700 shadow-sm font-bold";
+            else if (bStr.includes("Wd") || bStr.includes("Nb")) bg = "bg-amber-500 text-white border-amber-600 shadow-sm font-bold";
+            recentHTML += `<div class="min-w-[2rem] px-1.5 h-8 flex items-center justify-center font-bold text-xs rounded ${bg}">${bStr}</div>`;
+        });
+    } else if (targetState.past_overs && targetState.past_overs.length > 0) {
+        // If an over just completed, show the completed over's balls with context
+        let lastOverNum = targetState.past_overs.length;
+        let lastOver = targetState.past_overs[lastOverNum - 1];
+        if (lastOver && Array.isArray(lastOver.balls) && lastOver.balls.length > 0) {
+            recentHTML += `<span class="text-[11px] font-bold text-slate-400 self-center mr-1">Ov ${lastOverNum}:</span>`;
+            lastOver.balls.forEach(b => {
+                let bStr = String(b);
+                let bg = "bg-slate-100 text-slate-700 border-slate-300 border opacity-85";
+                if (bStr.includes("W") && !bStr.includes("Wd")) bg = "bg-[#cc0000]/80 text-white border-red-700";
+                else if (bStr.includes("4")) bg = "bg-blue-600/80 text-white border-blue-700";
+                else if (bStr.includes("6")) bg = "bg-emerald-600/80 text-white border-emerald-700";
+                else if (bStr.includes("Pen")) bg = "bg-purple-600/80 text-white border-purple-700";
+                else if (bStr.includes("Wd") || bStr.includes("Nb")) bg = "bg-amber-500/80 text-white border-amber-600";
+                recentHTML += `<div class="min-w-[2rem] px-1.5 h-8 flex items-center justify-center font-bold text-xs rounded ${bg}">${bStr}</div>`;
+            });
+            recentHTML += `<span class="text-[10px] text-slate-400 font-semibold self-center ml-1 italic">(Over complete)</span>`;
+        } else {
+            recentHTML = `<span class="text-xs text-slate-400 italic py-1">Start of over — no balls bowled yet</span>`;
+        }
+    } else {
+        recentHTML = `<span class="text-xs text-slate-400 italic py-1">Start of innings — no balls bowled yet</span>`;
+    }
+    let elRecentBalls = document.getElementById("recent-balls");
+    if (elRecentBalls) elRecentBalls.innerHTML = recentHTML;
+    
+    // Dynamic Innings Status Banner in Scorecard
+    let elBanner = document.getElementById("scorecard-innings-banner");
+    if (elBanner) {
+        let inningsNum = activeScorecardTab;
+        let bRuns = targetState.runs !== undefined ? targetState.runs : 0;
+        let bWkts = targetState.wickets !== undefined ? targetState.wickets : 0;
+        let bOv = targetState.overs_completed !== undefined ? `${targetState.overs_completed}.${targetState.balls_this_over || 0}` : "0.0";
+        let bBpo = state.balls_per_over || 6;
+        let bTotBalls = ((targetState.overs_completed || 0) * bBpo) + (targetState.balls_this_over || 0);
+        let bRR = bTotBalls > 0 ? (bRuns / bTotBalls * bBpo).toFixed(2) : "0.00";
+        
+        elBanner.style.background = `linear-gradient(to right, ${hexToRgba(tabBattingTheme.color, 0.08)}, ${hexToRgba(tabBattingTheme.color, 0.02)})`;
+        elBanner.style.borderColor = hexToRgba(tabBattingTheme.color, 0.22);
+        
+        let isChasing = (inningsNum === 2);
+        let rightBadge = "";
+        if (isChasing && state.target) {
+            rightBadge = `
+                <div class="text-right flex items-center gap-2">
+                    <span class="text-xs font-bold px-2.5 py-1 rounded-lg shadow-2xs" style="background: ${hexToRgba(tabBattingTheme.color, 0.15)}; color: ${tabBattingTheme.color};">Target: ${state.target}</span>
+                    <span class="text-xs text-slate-500 font-semibold">CRR: <strong class="text-slate-800">${bRR}</strong></span>
+                </div>
+            `;
+        } else {
+            rightBadge = `
+                <div class="text-right">
+                    <div class="text-xs text-slate-500 font-semibold">CRR: <strong class="text-slate-800 text-sm">${bRR}</strong></div>
+                </div>
+            `;
+        }
+        
+        elBanner.innerHTML = `
+            <div class="flex items-center gap-2.5">
+                ${tabBattingTheme.logo ? `<img src="${tabBattingTheme.logo}" class="w-9 h-9 rounded-xl object-contain bg-white p-1 shadow-2xs border border-slate-200/80">` : `<div class="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shadow-2xs" style="background: ${hexToRgba(tabBattingTheme.color, 0.18)}; color: ${tabBattingTheme.color};">${(tabBattingTheme.name || "?").charAt(0)}</div>`}
+                <div>
+                    <div class="font-extrabold text-slate-800 text-sm flex items-center gap-1.5 leading-tight">
+                        <span>${tabBattingTheme.name}</span>
+                        <span class="w-2 h-2 rounded-full" style="background: ${tabBattingTheme.color};"></span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 font-medium mt-0.5">
+                        ${inningsNum === 1 ? '1st Innings' : '2nd Innings'} • Max ${state.max_overs} ov
+                    </div>
+                </div>
+            </div>
+            ${rightBadge}
+        `;
+    }
     
     // Batting Table
     let batHTML = "";
-    if (targetState.batsmen_stats) {
-        Object.keys(targetState.batsmen_stats).forEach(name => {
-            let p = targetState.batsmen_stats[name];
-            let sr = p.balls > 0 ? (p.runs / p.balls * 100).toFixed(2) : "0.00";
-            let color = p.status !== "not out" ? "text-gray-500" : "text-black font-bold";
-            
-            let pMeta = meta.players.find(x => (x.full_name || x.first_name + " " + x.last_name) === name);
-            let imgTag = (pMeta && pMeta.image) ? `<img src="${pMeta.image}" class="w-8 h-8 rounded-full object-cover border border-gray-300 bg-white">` : `<div class="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-xs text-white">${name.charAt(0)}</div>`;
-            
-            batHTML += `
-                <tr class="border-b ${color}">
-                    <td class="py-2">
-                        <div class="flex items-center gap-2">
-                            ${imgTag}
-                            <div>
-                                <div>${name}</div>
-                                <div class="text-xs text-gray-500 font-normal">${p.status}</div>
+    try {
+        if (targetState.batsmen_stats && Object.keys(targetState.batsmen_stats).length > 0) {
+            let playersList = (meta && Array.isArray(meta.players)) ? meta.players : [];
+            Object.keys(targetState.batsmen_stats).forEach(name => {
+                let p = targetState.batsmen_stats[name] || {};
+                let pRuns = p.runs !== undefined ? p.runs : 0;
+                let pBalls = p.balls !== undefined ? p.balls : 0;
+                let sr = pBalls > 0 ? (pRuns / pBalls * 100).toFixed(2) : "0.00";
+                let isStriker = state.striker && state.striker.name === name;
+                let isNonStriker = state.non_striker && state.non_striker.name === name;
+                let isOut = p.status && p.status !== "not out";
+                
+                let rowStyle = "";
+                let rowClass = "border-b border-slate-100/90 transition-colors";
+                
+                if (isStriker) {
+                    rowStyle = `background: ${hexToRgba(tabBattingTheme.color, 0.05)}; border-left: 3px solid ${tabBattingTheme.color};`;
+                    rowClass += " font-bold";
+                } else if (isNonStriker) {
+                    rowStyle = `background: rgba(248, 250, 252, 0.8); border-left: 3px solid #94a3b8;`;
+                    rowClass += " font-semibold";
+                } else if (isOut) {
+                    rowClass += " text-slate-500 opacity-80";
+                }
+                
+                let pMeta = playersList.find(x => x && ((x.full_name || (x.first_name ? (x.first_name + " " + (x.last_name || "")) : "")).trim() === (name || "").trim()));
+                let imgTag = (pMeta && pMeta.image) 
+                    ? `<img src="${pMeta.image}" class="w-10 h-10 rounded-full object-cover border border-slate-200 bg-white shadow-2xs shrink-0">` 
+                    : `<div class="w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shadow-2xs shrink-0" style="background: ${hexToRgba(tabBattingTheme.color, 0.15)}; color: ${tabBattingTheme.color};">${(name || "?").charAt(0).toUpperCase()}</div>`;
+                
+                let statusText = isStriker 
+                    ? `<span class="text-[10px] font-bold px-1.5 py-0.2 rounded" style="background: ${hexToRgba(tabBattingTheme.color, 0.15)}; color: ${tabBattingTheme.color};">Striker</span>`
+                    : (isNonStriker 
+                        ? `<span class="text-[10px] font-semibold text-slate-500">Non-striker</span>`
+                        : `<span class="text-[11px] text-slate-400 font-medium">${formatDismissal(p.status)}</span>`);
+                
+                let displayName = toTitleCase(name);
+                batHTML += `
+                    <tr class="${rowClass}" style="${rowStyle}">
+                        <td class="py-1 pl-3">
+                            <div class="flex items-center gap-2.5">
+                                ${imgTag}
+                                <div class="min-w-0">
+                                    <div class="text-slate-800 text-sm leading-tight truncate font-semibold">${displayName}${isStriker ? ' *' : ''}</div>
+                                    <div class="mt-0.5 leading-none">${statusText}</div>
+                                </div>
                             </div>
-                        </div>
-                    </td>
-                    <td class="text-center">${p.runs}</td>
-                    <td class="text-center">${p.balls}</td>
-                    <td class="text-center">${p["4s"] || 0}</td>
-                    <td class="text-center">${p["6s"] || 0}</td>
-                    <td class="text-center">${sr}</td>
-                </tr>
-            `;
-        });
+                        </td>
+                        <td class="text-center font-black text-slate-900 text-sm py-1">${pRuns}</td>
+                        <td class="text-center text-xs font-semibold text-slate-600 py-1">${pBalls}</td>
+                        <td class="text-center text-xs font-semibold text-slate-600 py-1">${p["4s"] || 0}</td>
+                        <td class="text-center text-xs font-semibold text-slate-600 py-1">${p["6s"] || 0}</td>
+                        <td class="text-center text-xs font-bold text-slate-700 pr-3 py-1">${sr}</td>
+                    </tr>
+                `;
+            });
+        }
+    } catch (e) {
+        console.error("Error rendering batting table:", e);
     }
-    document.getElementById("batting-table-body").innerHTML = batHTML;
+    if (!batHTML) {
+        if (activeScorecardTab === 2 && (state.innings || 1) === 1) {
+            batHTML = `<tr><td colspan="6" class="text-center py-7 text-slate-400 font-medium"><div class="text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">2nd Innings Not Started</div>${state.team_2_name || "Team 2"} yet to bat</td></tr>`;
+        } else {
+            batHTML = `<tr><td colspan="6" class="text-center py-5 text-xs text-slate-400 italic">No batting statistics recorded yet</td></tr>`;
+        }
+    }
+    let elBatTbody = document.getElementById("batting-table-body");
+    if (elBatTbody) elBatTbody.innerHTML = batHTML;
     
     // Yet to bat
-    let batTeamId = targetState.batting_team_id;
-    let yetToBatStr = "";
-    if (batTeamId) {
-        let allBatters = meta.players.filter(p => p.team === batTeamId);
-        let outBatsmen = targetState.out_batsmen || [];
-        let currentlyBatting = targetState.batsmen_stats ? Object.keys(targetState.batsmen_stats) : [];
-        
-        let yetToBatNames = allBatters
-            .map(p => p.full_name || p.first_name + " " + p.last_name)
-            .filter(name => !currentlyBatting.includes(name) && !outBatsmen.includes(name));
+    let yetToBatNames = [];
+    try {
+        let batTeamId = targetState.batting_team_id;
+        if (batTeamId) {
+            let playersList = (meta && Array.isArray(meta.players)) ? meta.players : [];
+            let cleanBatTeamId = String(batTeamId).replace(/-/g, "").toLowerCase();
+            let allBatters = playersList.filter(p => p && p.team && String(p.team).replace(/-/g, "").toLowerCase() === cleanBatTeamId);
+            let outBatsmen = targetState.out_batsmen || [];
+            let currentlyBatting = targetState.batsmen_stats ? Object.keys(targetState.batsmen_stats) : [];
             
-        yetToBatStr = yetToBatNames.join(" . ");
+            yetToBatNames = allBatters
+                .map(p => (p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : "")).trim())
+                .filter(name => name && !currentlyBatting.includes(name) && !outBatsmen.includes(name));
+        }
+    } catch (e) {
+        console.error("Error rendering yet to bat:", e);
     }
+    
+    let elYetToBatCount = document.getElementById("yet-to-bat-count");
+    if (elYetToBatCount) {
+        elYetToBatCount.innerText = yetToBatNames.length > 0 ? `${yetToBatNames.length} remaining` : "";
+    }
+    
     let elYetToBat = document.getElementById("yet-to-bat");
-    if (elYetToBat) elYetToBat.innerText = yetToBatStr;
+    if (elYetToBat) {
+        if (yetToBatNames.length > 0) {
+            let chips = yetToBatNames.map(name => `
+                <span class="inline-block px-2.5 py-1 rounded-lg bg-white border border-slate-200/90 text-slate-700 text-xs font-semibold shadow-2xs hover:border-slate-300 transition-colors">
+                    ${toTitleCase(name)}
+                </span>
+            `).join("");
+            elYetToBat.innerHTML = `<div class="flex flex-wrap gap-1.5 mt-1">${chips}</div>`;
+        } else {
+            if (activeScorecardTab === 2 && (state.innings || 1) === 1) {
+                elYetToBat.innerHTML = `<div class="py-1 text-xs text-slate-400 italic">Full squad available for 2nd innings</div>`;
+            } else {
+                elYetToBat.innerHTML = `<div class="py-1 text-xs text-slate-400 italic">All batsmen have batted</div>`;
+            }
+        }
+    }
     
     // Bowling Table
     let bowlHTML = "";
-    if (targetState.bowler_stats) {
-        Object.keys(targetState.bowler_stats).forEach(name => {
-            let p = targetState.bowler_stats[name];
-            let overs = p.overs || 0;
-            let b_full = Math.floor(overs);
-            let b_rem = Math.round((overs - b_full) * 10);
-            let t_balls = b_full * bpo + b_rem;
-            let econ = t_balls > 0 ? (p.runs / t_balls * bpo).toFixed(2) : "0.00";
-            
-            let pMeta = meta.players.find(x => (x.full_name || x.first_name + " " + x.last_name) === name);
-            let imgTag = (pMeta && pMeta.image) ? `<img src="${pMeta.image}" class="w-8 h-8 rounded-full object-cover border border-gray-300 bg-white">` : `<div class="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center text-xs text-white">${name.charAt(0)}</div>`;
-
-            bowlHTML += `
-                <tr class="border-b">
-                    <td class="py-2 flex items-center gap-2">
-                        ${imgTag}
-                        <div>${name}</div>
-                    </td>
-                    <td class="text-center">${p.overs}</td>
-                    <td class="text-center">${p.maidens || 0}</td>
-                    <td class="text-center">${p.runs}</td>
-                    <td class="text-center">${p.wickets}</td>
-                    <td class="text-center">${econ}</td>
-                </tr>
-            `;
-        });
+    let elBowlHeader = document.getElementById("bowling-table-header");
+    if (elBowlHeader) {
+        elBowlHeader.innerHTML = `Bowler <span class="font-normal opacity-75 text-[10px]">(${tabBowlingTheme.name})</span>`;
     }
-    document.getElementById("bowling-table-body").innerHTML = bowlHTML;
+    
+    try {
+        if (targetState.bowler_stats && Object.keys(targetState.bowler_stats).length > 0) {
+            let playersList = (meta && Array.isArray(meta.players)) ? meta.players : [];
+            Object.keys(targetState.bowler_stats).forEach(name => {
+                let p = targetState.bowler_stats[name] || {};
+                let overs = p.overs || 0;
+                let b_full = Math.floor(overs);
+                let b_rem = Math.round((overs - b_full) * 10);
+                let t_balls = b_full * bpo + b_rem;
+                let pRuns = p.runs || 0;
+                let econ = t_balls > 0 ? (pRuns / t_balls * bpo).toFixed(2) : "0.00";
+                let isCurrentBowler = state.bowler && (typeof state.bowler === 'object' ? state.bowler.name === name : state.bowler === name);
+                
+                let rowStyle = isCurrentBowler ? `background: ${hexToRgba(tabBowlingTheme.color, 0.05)}; border-left: 3px solid ${tabBowlingTheme.color};` : "";
+                let rowClass = isCurrentBowler ? "border-b border-slate-100 font-bold" : "border-b border-slate-100/90 hover:bg-slate-50/50 transition-colors";
+                
+                let pMeta = playersList.find(x => x && ((x.full_name || (x.first_name ? (x.first_name + " " + (x.last_name || "")) : "")).trim() === (name || "").trim()));
+                let imgTag = (pMeta && pMeta.image) 
+                    ? `<img src="${pMeta.image}" class="w-10 h-10 rounded-full object-cover border border-slate-200 bg-white shadow-2xs shrink-0">` 
+                    : `<div class="w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shadow-2xs shrink-0" style="background: ${hexToRgba(tabBowlingTheme.color, 0.15)}; color: ${tabBowlingTheme.color};">${(name || "?").charAt(0).toUpperCase()}</div>`;
+
+                let displayName = toTitleCase(name);
+                bowlHTML += `
+                    <tr class="${rowClass}" style="${rowStyle}">
+                        <td class="py-1 pl-3">
+                            <div class="flex items-center gap-2.5">
+                                ${imgTag}
+                                <div class="min-w-0">
+                                    <div class="text-slate-800 text-sm leading-tight truncate font-semibold">${displayName}</div>
+                                    ${isCurrentBowler ? `<span class="text-[10px] font-bold px-1.5 py-0.2 rounded inline-block mt-0.5" style="background: ${hexToRgba(tabBowlingTheme.color, 0.15)}; color: ${tabBowlingTheme.color};">Current</span>` : ''}
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center text-xs font-semibold text-slate-700 py-1">${p.overs || 0}</td>
+                        <td class="text-center text-xs font-semibold text-slate-600 py-1">${p.maidens || 0}</td>
+                        <td class="text-center text-xs font-bold text-slate-800 py-1">${pRuns}</td>
+                        <td class="text-center py-1">
+                            <span class="inline-block px-2 py-0.5 rounded-md font-black text-xs shadow-2xs" style="background: ${hexToRgba(tabBowlingTheme.color, 0.15)}; color: ${tabBowlingTheme.color};">
+                                ${p.wickets || 0}
+                            </span>
+                        </td>
+                        <td class="text-center text-xs font-bold text-slate-700 pr-3 py-1">${econ}</td>
+                    </tr>
+                `;
+            });
+        }
+    } catch (e) {
+        console.error("Error rendering bowling table:", e);
+    }
+    if (!bowlHTML) {
+        if (activeScorecardTab === 2 && (state.innings || 1) === 1) {
+            bowlHTML = `<tr><td colspan="6" class="text-center py-7 text-slate-400 font-medium">Innings 2 not started yet</td></tr>`;
+        } else {
+            bowlHTML = `<tr><td colspan="6" class="text-center py-5 text-xs text-slate-400 italic">No bowling statistics recorded yet</td></tr>`;
+        }
+    }
+    let elBowlTbody = document.getElementById("bowling-table-body");
+    if (elBowlTbody) elBowlTbody.innerHTML = bowlHTML;
+    
+    // Scorecard Footer Summary
+    let elFooter = document.getElementById("scorecard-footer-summary");
+    if (elFooter) {
+        elFooter.innerHTML = `
+            <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-700">Extras:</span>
+                <span class="font-black text-slate-900">${exTotal}</span>
+                <span class="text-slate-400 text-[11px]">(Wd ${ex.wd || 0}, Nb ${ex.nb || 0}, B ${ex.b || 0}, LB ${ex.lb || 0}${penText})</span>
+            </div>
+            <div class="text-[11px] text-slate-400">
+                <span>Status: </span>
+                <strong class="text-slate-700 font-semibold">${activeScorecardTab === (state.innings || 1) ? (state.match_over ? 'Final' : 'Live') : 'Completed'}</strong>
+            </div>
+        `;
+    }
     
     // Update sidebar live status
     let sbStatus = document.getElementById("sidebar-match-status");
@@ -385,14 +823,15 @@ async function _doShowNewOverPrompt(prevBowler) {
     let state = await eel.get_state()();
     let meta = await populateImageCaches(state);
     
-    let bowlPlayers = meta.players;
+    let bowlPlayers = (meta && Array.isArray(meta.players)) ? meta.players : [];
     if (state.bowling_team_id) {
-        bowlPlayers = bowlPlayers.filter(p => p.team === state.bowling_team_id);
+        let cleanBowlId = String(state.bowling_team_id).replace(/-/g, "").toLowerCase();
+        bowlPlayers = bowlPlayers.filter(p => p && p.team && String(p.team).replace(/-/g, "").toLowerCase() === cleanBowlId);
     }
     
     let options = bowlPlayers
-        .map(p => p.full_name || p.first_name + " " + p.last_name)
-        .filter(name => name !== prevBowler)
+        .map(p => (p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : "")).trim())
+        .filter(name => name && name !== prevBowler)
         .map(name => `<option value="${name}">${name}</option>`)
         .join("");
 
@@ -433,33 +872,69 @@ async function _doShowInnings2Setup(target) {
     
     // Remember the IDs are already swapped in Python state! 
     // So batting team is the new chasing team.
-    let batPlayers = meta.players.filter(p => p.team === state.batting_team_id);
-    let bowlPlayers = meta.players.filter(p => p.team === state.bowling_team_id);
+    let playersList = (meta && Array.isArray(meta.players)) ? meta.players : [];
+    let cleanBatId = String(state.batting_team_id || "").replace(/-/g, "").toLowerCase();
+    let cleanBowlId = String(state.bowling_team_id || "").replace(/-/g, "").toLowerCase();
+    let batPlayers = playersList.filter(p => p && p.team && String(p.team).replace(/-/g, "").toLowerCase() === cleanBatId);
+    let bowlPlayers = playersList.filter(p => p && p.team && String(p.team).replace(/-/g, "").toLowerCase() === cleanBowlId);
     
-    let batOptions = batPlayers.map(p => p.full_name || p.first_name + " " + p.last_name).map(name => `<option value="${name}">${name}</option>`).join("");
-    let bowlOptions = bowlPlayers.map(p => p.full_name || p.first_name + " " + p.last_name).map(name => `<option value="${name}">${name}</option>`).join("");
+    let batNames = batPlayers.map(p => (p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : "")).trim()).filter(Boolean);
+    let bowlNames = bowlPlayers.map(p => (p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : "")).trim()).filter(Boolean);
+
+    if (batNames.length === 0) batNames = ["Opening Batsman 1", "Opening Batsman 2", "Batsman 3"];
+    if (bowlNames.length === 0) bowlNames = ["Opening Bowler", "Change Bowler"];
+
+    let batOptions1 = batNames.map((name, i) => `<option value="${name}" ${i === 0 ? 'selected' : ''}>${name}</option>`).join("");
+    let batOptions2 = batNames.map((name, i) => `<option value="${name}" ${i === 1 ? 'selected' : (i === 0 && batNames.length === 1 ? 'selected' : '')}>${name}</option>`).join("");
+    let bowlOptions = bowlNames.map((name, i) => `<option value="${name}" ${i === 0 ? 'selected' : ''}>${name}</option>`).join("");
 
     let html = `
-        <div class="p-4 bg-green-600 text-white font-bold text-lg">Innings 1 Over! Target: ${target}</div>
-        <div class="p-6 flex flex-col gap-4">
-            <div>
-                <label class="block font-bold mb-1">New Striker</label>
-                <select id="i2-striker" class="border p-2 w-full">${batOptions}</select>
+        <div class="p-4 bg-slate-900 text-white font-bold text-base flex justify-between items-center border-b border-slate-800">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white text-base font-black shadow-inner">
+                    🏏
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Start Innings 2 • Target: ${target} Runs</div>
+                    <div class="text-[11px] text-slate-400 font-normal">${state.team_2_name} need ${target} runs from ${state.max_overs} overs</div>
+                </div>
             </div>
-            <div>
-                <label class="block font-bold mb-1">New Non-Striker</label>
-                <select id="i2-nonstriker" class="border p-2 w-full">${batOptions}</select>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div class="p-3 bg-emerald-50 border border-emerald-200/80 rounded-xl text-xs text-emerald-950 flex items-center justify-between">
+                <div>
+                    <span class="font-bold text-emerald-900">Chasing Team:</span> ${state.team_2_name}
+                </div>
+                <div class="font-extrabold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full text-xs">
+                    Target: ${target} Runs
+                </div>
             </div>
-            <div>
-                <label class="block font-bold mb-1">Opening Bowler</label>
-                <select id="i2-bowler" class="border p-2 w-full">${bowlOptions}</select>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Striker</label>
+                    <select id="i2-striker" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">${batOptions1}</select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Non-Striker</label>
+                    <select id="i2-nonstriker" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">${batOptions2}</select>
+                </div>
             </div>
-            <div class="flex justify-end gap-2 mt-4">
-                <button onclick="submitInnings2Setup()" class="px-4 py-2 bg-green-600 text-white rounded font-bold">Start 2nd Innings</button>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Opening Bowler (${state.team_1_name})</label>
+                <select id="i2-bowler" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">${bowlOptions}</select>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 mt-1">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Cancel</button>
+                <button onclick="submitInnings2Setup()" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/30 transition-all active:scale-98">Start 2nd Innings</button>
             </div>
         </div>
     `;
-    showModal(html);
+    showModal(html, "w-[520px]");
 }
 
 window.submitInnings2Setup = async function() {
@@ -482,134 +957,560 @@ async function showMatchOverPrompt() {
     let state = await eel.get_state()();
     let meta = await populateImageCaches(state);
     
+    // Ensure all players for both teams are loaded into meta.players
+    if (meta && meta.teams) {
+        let t1Obj = meta.teams.find(t => t && t.name === state.team_1_name);
+        let t2Obj = meta.teams.find(t => t && t.name === state.team_2_name);
+        if (t1Obj && (!playerCache[t1Obj.id] || playerCache[t1Obj.id].length === 0)) {
+            try { playerCache[t1Obj.id] = await eel.get_players(t1Obj.id)(); } catch(e){}
+        }
+        if (t2Obj && (!playerCache[t2Obj.id] || playerCache[t2Obj.id].length === 0)) {
+            try { playerCache[t2Obj.id] = await eel.get_players(t2Obj.id)(); } catch(e){}
+        }
+        let allP = [];
+        if (t1Obj && Array.isArray(playerCache[t1Obj.id])) allP.push(...playerCache[t1Obj.id]);
+        if (t2Obj && Array.isArray(playerCache[t2Obj.id])) allP.push(...playerCache[t2Obj.id]);
+        meta.players = allP;
+    }
+    
     document.getElementById("scoring-screen").classList.add("hidden");
     let summaryScreen = document.getElementById("match-summary-screen");
     summaryScreen.classList.remove("hidden");
     
-    // Sort players
-    function getTopBatsmen(statsObj) {
-        if (!statsObj) return [];
-        let list = Object.values(statsObj).sort((a,b) => b.runs - a.runs).slice(0, 3);
-        while(list.length < 3) list.push({name: "", runs: "", balls: "", empty: true});
-        return list;
-    }
-    function getTopBowlers(statsObj) {
-        if (!statsObj) return [];
-        let list = Object.values(statsObj).sort((a,b) => {
-            if (b.wickets !== a.wickets) return b.wickets - a.wickets;
-            return a.runs - b.runs;
-        }).slice(0, 3);
-        while(list.length < 3) list.push({name: "", wickets: "", runs: "", overs: "", empty: true});
-        return list;
-    }
+    let t1Theme = getTeamTheme(meta, state.team_1_name, '#0f547c');
+    let t2Theme = getTeamTheme(meta, state.team_2_name, '#059669');
+    let bpo = state.balls_per_over || 6;
+    let playersList = (meta && Array.isArray(meta.players)) ? meta.players : [];
     
-    let i1_bat = getTopBatsmen(state.innings_1_stats ? state.innings_1_stats.batsmen_stats : {});
-    let i1_bowl = getTopBowlers(state.innings_1_stats ? state.innings_1_stats.bowler_stats : {});
-    
-    let i2_bat = getTopBatsmen(state.batsmen_stats);
-    let i2_bowl = getTopBowlers(state.bowler_stats);
-    
-    let t1 = meta.teams.find(t => t.name === state.team_1_name);
-    let t2 = meta.teams.find(t => t.name === state.team_2_name);
-    
-    let i1_score = state.innings_1_stats ? `${state.innings_1_stats.runs}/${state.innings_1_stats.wickets}` : "0/0";
-    let i1_overs = state.innings_1_stats ? `${state.innings_1_stats.overs_completed}.${state.innings_1_stats.balls_this_over} overs` : "0 overs";
-    
-    let i2_score = `${state.runs}/${state.wickets}`;
-    let i2_overs = `${state.overs_completed}.${state.balls_this_over} overs`;
-    
-    let result = "";
-    if (state.runs >= state.target) {
-        result = `${state.team_2_name.toUpperCase()} WON BY ${10 - state.wickets} WICKETS`;
-    } else if (state.runs < state.target - 1) {
-        result = `${state.team_1_name.toUpperCase()} WON BY ${(state.target - 1) - state.runs} RUNS`;
-    } else {
-        result = `MATCH TIED`;
-    }
-    
-    function renderPlayerRow(p, isBat) {
-        if (p.empty) return `<div class="h-8 bg-gray-300 w-full rounded"></div>`;
-        if (isBat) {
-            return `<div class="h-8 bg-gray-300 w-full rounded px-4 flex justify-between items-center font-bold">
-                        <div>${p.name}</div>
-                        <div>${p.runs} <span class="text-xs font-normal">(${p.balls})</span></div>
-                    </div>`;
-        } else {
-            return `<div class="h-8 bg-gray-300 w-full rounded px-4 flex justify-between items-center font-bold">
-                        <div>${p.name}</div>
-                        <div>${p.wickets} - ${p.runs} <span class="text-xs font-normal">(${p.overs})</span></div>
-                    </div>`;
+    // Player avatar helper
+    function getPlayerAvatar(pName, teamTheme) {
+        if (!pName) return '';
+        let cleanName = pName.trim().toLowerCase();
+        let pMeta = playersList.find(x => {
+            if (!x) return false;
+            let fn = (x.full_name || (x.first_name ? (x.first_name + " " + (x.last_name || "")) : "")).trim().toLowerCase();
+            return fn === cleanName || (x.first_name && x.first_name.toLowerCase() === cleanName) || (x.last_name && x.last_name.toLowerCase() === cleanName);
+        });
+        
+        if (pMeta && pMeta.image) {
+            return `<img src="${pMeta.image}" class="w-9 h-9 rounded-xl object-cover bg-white border border-slate-200 shadow-2xs shrink-0" alt="${pName}">`;
         }
+        
+        let initial = pName.charAt(0).toUpperCase();
+        return `
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs shrink-0 shadow-2xs" 
+                 style="background: ${hexToRgba(teamTheme.color, 0.15)}; color: ${teamTheme.color}; border: 1.5px solid ${hexToRgba(teamTheme.color, 0.3)};">
+                ${initial}
+            </div>
+        `;
     }
+    
+    // Extract top batsmen
+    function getTopBatsmen(statsObj) {
+        if (!statsObj || typeof statsObj !== 'object') return [];
+        let list = Object.values(statsObj).filter(p => p && p.name && (p.runs !== undefined || p.balls !== undefined));
+        list.sort((a, b) => {
+            let rA = a.runs || 0;
+            let rB = b.runs || 0;
+            if (rB !== rA) return rB - rA;
+            return (a.balls || 0) - (b.balls || 0);
+        });
+        return list.slice(0, 3);
+    }
+    
+    // Extract top bowlers
+    function getTopBowlers(statsObj) {
+        if (!statsObj || typeof statsObj !== 'object') return [];
+        let list = Object.values(statsObj).filter(b => b && b.name && (b.overs !== undefined || b.wickets !== undefined || b.runs !== undefined));
+        list.sort((a, b) => {
+            let wA = a.wickets || 0;
+            let wB = b.wickets || 0;
+            if (wB !== wA) return wB - wA; // more wickets first
+            return (a.runs || 0) - (b.runs || 0); // fewer runs first
+        });
+        return list.slice(0, 3);
+    }
+    
+    // Extras helper
+    function formatExtras(extrasObj) {
+        if (!extrasObj) return { total: 0, detail: "0" };
+        let wd = extrasObj.wd || 0;
+        let nb = extrasObj.nb || 0;
+        let b = extrasObj.b || 0;
+        let lb = extrasObj.lb || 0;
+        let pen = extrasObj.pen || 0;
+        let total = wd + nb + b + lb + pen;
+        let parts = [];
+        if (wd > 0) parts.push(`w ${wd}`);
+        if (nb > 0) parts.push(`nb ${nb}`);
+        if (b > 0) parts.push(`b ${b}`);
+        if (lb > 0) parts.push(`lb ${lb}`);
+        if (pen > 0) parts.push(`pen ${pen}`);
+        return {
+            total: total,
+            detail: parts.length > 0 ? parts.join(", ") : "0"
+        };
+    }
+    
+    // Boundary counter
+    function countBoundaries(statsObj) {
+        let fours = 0, sixes = 0;
+        if (!statsObj) return { fours, sixes };
+        Object.values(statsObj).forEach(p => {
+            if (p) {
+                fours += (p['4s'] || p.fours || 0);
+                sixes += (p['6s'] || p.sixes || 0);
+            }
+        });
+        return { fours, sixes };
+    }
+    
+    let isEndedIn1 = (!state.innings || state.innings === 1);
+    
+    // Innings 1 data
+    let i1_runs = isEndedIn1 ? (state.runs || 0) : (state.innings_1_stats ? (state.innings_1_stats.runs || 0) : 0);
+    let i1_wickets = isEndedIn1 ? (state.wickets || 0) : (state.innings_1_stats ? (state.innings_1_stats.wickets || 0) : 0);
+    let i1_oversComp = isEndedIn1 ? (state.overs_completed || 0) : (state.innings_1_stats ? (state.innings_1_stats.overs_completed || 0) : 0);
+    let i1_ballsOver = isEndedIn1 ? (state.balls_this_over || 0) : (state.innings_1_stats ? (state.innings_1_stats.balls_this_over || 0) : 0);
+    let i1_batsmenStats = isEndedIn1 ? (state.batsmen_stats || {}) : (state.innings_1_stats ? (state.innings_1_stats.batsmen_stats || {}) : {});
+    let i1_bowlerStats = isEndedIn1 ? (state.bowler_stats || {}) : (state.innings_1_stats ? (state.innings_1_stats.bowler_stats || {}) : {});
+    let i1_extras = isEndedIn1 ? (state.extras || {}) : (state.innings_1_stats ? (state.innings_1_stats.extras || {}) : {});
+    let i1_score = `${i1_runs}/${i1_wickets}`;
+    let i1_overs = `${i1_oversComp}.${i1_ballsOver}`;
+    let i1_totBalls = (i1_oversComp * bpo) + i1_ballsOver;
+    let i1_crr = i1_totBalls > 0 ? (i1_runs / (i1_totBalls / bpo)).toFixed(2) : "0.00";
+    let i1_ext = formatExtras(i1_extras);
+    let i1_bat = getTopBatsmen(i1_batsmenStats);
+    let i1_bowl = getTopBowlers(i1_bowlerStats);
+    
+    // Innings 2 data
+    let i2_runs = isEndedIn1 ? 0 : (state.runs || 0);
+    let i2_wickets = isEndedIn1 ? 0 : (state.wickets || 0);
+    let i2_oversComp = isEndedIn1 ? 0 : (state.overs_completed || 0);
+    let i2_ballsOver = isEndedIn1 ? 0 : (state.balls_this_over || 0);
+    let i2_batsmenStats = isEndedIn1 ? {} : (state.batsmen_stats || {});
+    let i2_bowlerStats = isEndedIn1 ? {} : (state.bowler_stats || {});
+    let i2_extras = isEndedIn1 ? {} : (state.extras || {});
+    let i2_score = isEndedIn1 ? (state.bowling_team_penalty ? `${state.bowling_team_penalty}/0 (Pen)` : "Did not bat") : `${i2_runs}/${i2_wickets}`;
+    let i2_overs = isEndedIn1 ? "-" : `${i2_oversComp}.${i2_ballsOver}`;
+    let i2_totBalls = (i2_oversComp * bpo) + i2_ballsOver;
+    let i2_crr = (!isEndedIn1 && i2_totBalls > 0) ? (i2_runs / (i2_totBalls / bpo)).toFixed(2) : "0.00";
+    let i2_ext = formatExtras(i2_extras);
+    let i2_bat = getTopBatsmen(i2_batsmenStats);
+    let i2_bowl = getTopBowlers(i2_bowlerStats);
+    
+    // Determine winner & result message
+    let winnerTheme = null;
+    let resultTitle = "";
+    let resultSubtitle = "";
+    let subBadge = "MATCH RESULT";
+    let trophyIcon = `
+        <svg class="w-10 h-10 text-amber-300 drop-shadow-md" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M5 3h14v2H5V3zm2 4v2c0 2.21 1.79 4 4 4v2.09c-2.83.48-5 2.94-5 5.91h12c0-2.97-2.17-5.43-5-5.91V13c2.21 0 4-1.79 4-4V7H7zm-2 2h2v2c0 1.1-.9 2-2 2s-2-.9-2-2v-2zm14 0c0 1.1-.9 2-2 2v-2h2z"/>
+        </svg>
+    `;
+    
+    if (state.abandoned || state.status === "ABANDONED") {
+        resultTitle = "MATCH ABANDONED";
+        resultSubtitle = "The match was called off without a conclusive result";
+        subBadge = "NO RESULT";
+        trophyIcon = `
+            <svg class="w-10 h-10 text-slate-300 drop-shadow-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+            </svg>
+        `;
+    } else if (state.target && state.runs >= state.target) {
+        // Team 2 won
+        winnerTheme = t2Theme;
+        let maxW = state.max_wickets || 10;
+        let wLeft = Math.max(0, maxW - (state.wickets || 0));
+        resultTitle = `${state.team_2_name.toUpperCase()} WON`;
+        resultSubtitle = `Won by ${wLeft} wicket${wLeft !== 1 ? 's' : ''} with ${state.max_overs ? (state.max_overs - state.overs_completed) + ' overs' : 'balls'} remaining`;
+        subBadge = "CHAMPIONS";
+    } else if (state.target && state.runs < state.target - 1) {
+        // Team 1 won
+        winnerTheme = t1Theme;
+        let runsDiff = (state.target - 1) - (state.runs || 0);
+        resultTitle = `${state.team_1_name.toUpperCase()} WON`;
+        resultSubtitle = `Defended total successfully • Won by ${runsDiff} run${runsDiff !== 1 ? 's' : ''}`;
+        subBadge = "CHAMPIONS";
+    } else if (state.target && state.runs === state.target - 1) {
+        resultTitle = "MATCH TIED";
+        resultSubtitle = `Thrilling finish! Scores level at ${state.runs} runs each`;
+        subBadge = "TIED MATCH";
+        trophyIcon = `
+            <svg class="w-10 h-10 text-amber-300 drop-shadow-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>
+            </svg>
+        `;
+    } else {
+        resultTitle = state.match_result || "MATCH CONCLUDED";
+        resultSubtitle = "Official match result recorded";
+        subBadge = "COMPLETED";
+    }
+    
+    // Hero Banner styling
+    let heroBg = "";
+    if (winnerTheme) {
+        heroBg = `background: linear-gradient(135deg, ${winnerTheme.darkColor} 0%, ${winnerTheme.color} 55%, ${winnerTheme.lightColor} 100%);`;
+    } else if (state.abandoned || state.status === "ABANDONED") {
+        heroBg = `background: linear-gradient(135deg, #1e293b 0%, #334155 55%, #475569 100%);`;
+    } else {
+        heroBg = `background: linear-gradient(135deg, #78350f 0%, #b45309 55%, #d97706 100%);`;
+    }
+    
+    let winnerVisual = trophyIcon;
+    if (winnerTheme && winnerTheme.logo) {
+        winnerVisual = `
+            <div class="relative">
+                <img src="${winnerTheme.logo}" class="w-16 h-16 rounded-2xl object-contain bg-white p-1.5 shadow-md">
+                <span class="absolute -bottom-2 -right-2 text-xl drop-shadow">🏆</span>
+            </div>
+        `;
+    }
+    
+    // Render batter row
+    function renderBatterRow(p, teamTheme) {
+        let runs = p.runs !== undefined ? p.runs : 0;
+        let balls = p.balls !== undefined ? p.balls : 0;
+        let fours = p['4s'] || p.fours || 0;
+        let sixes = p['6s'] || p.sixes || 0;
+        let sr = balls > 0 ? ((runs / balls) * 100).toFixed(1) : "0.0";
+        let isNotOut = p.status === "not out";
+        let avatar = getPlayerAvatar(p.name, teamTheme);
+        
+        return `
+            <div class="flex items-center justify-between p-3 rounded-2xl bg-white hover:bg-slate-50/80 transition-all border border-slate-100 shadow-2xs">
+                <div class="flex items-center gap-3 min-w-0">
+                    ${avatar}
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                            <span>${toTitleCase(p.name)}</span>
+                            ${isNotOut ? `<span class="w-1.5 h-1.5 rounded-full" style="background: ${teamTheme.color};" title="Not Out"></span>` : ''}
+                        </div>
+                        <div class="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mt-0.5">
+                            <span>${balls}b</span>
+                            <span class="text-slate-300">•</span>
+                            <span>${fours}x4</span>
+                            <span class="text-slate-300">•</span>
+                            <span>${sixes}x6</span>
+                            <span class="text-slate-300">•</span>
+                            <span>SR: ${sr}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="shrink-0 pl-3">
+                    <div class="px-3 py-1.5 rounded-xl font-black text-sm flex items-baseline gap-1 shadow-2xs" 
+                         style="background: ${teamTheme.color}; color: ${teamTheme.textColor};">
+                        <span>${runs}</span>
+                        <span class="text-[10px] font-normal opacity-85">r</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Render bowler row
+    function renderBowlerRow(p, bowlTeamTheme) {
+        let overs = p.overs !== undefined ? p.overs : 0;
+        let wickets = p.wickets !== undefined ? p.wickets : 0;
+        let runs = p.runs !== undefined ? p.runs : 0;
+        let maidens = p.maidens !== undefined ? p.maidens : 0;
+        
+        let b_full = Math.floor(overs);
+        let b_rem = Math.round((overs - b_full) * 10);
+        let t_balls = b_full * bpo + b_rem;
+        let econ = t_balls > 0 ? ((runs / t_balls) * bpo).toFixed(2) : "0.00";
+        let avatar = getPlayerAvatar(p.name, bowlTeamTheme);
+        
+        return `
+            <div class="flex items-center justify-between p-3 rounded-2xl bg-white hover:bg-slate-50/80 transition-all border border-slate-100 shadow-2xs">
+                <div class="flex items-center gap-3 min-w-0">
+                    ${avatar}
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                            <span>${toTitleCase(p.name)}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mt-0.5">
+                            <span>${overs} ov</span>
+                            <span class="text-slate-300">•</span>
+                            <span>M: ${maidens}</span>
+                            <span class="text-slate-300">•</span>
+                            <span>Econ: ${econ}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="shrink-0 pl-3">
+                    <div class="px-3 py-1.5 rounded-xl font-black text-sm flex items-baseline gap-0.5 shadow-2xs" 
+                         style="background: ${bowlTeamTheme.color}; color: ${bowlTeamTheme.textColor};">
+                        <span>${wickets}</span>
+                        <span class="text-xs font-normal opacity-80">/</span>
+                        <span>${runs}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Overall Match Highlights
+    let bnd1 = countBoundaries(i1_batsmenStats);
+    let bnd2 = countBoundaries(i2_batsmenStats);
+    let totalFours = bnd1.fours + bnd2.fours;
+    let totalSixes = bnd1.sixes + bnd2.sixes;
+    let totalBoundaries = totalFours + totalSixes;
+    let totalExtras = i1_ext.total + i2_ext.total;
+    let totalMatchRuns = i1_runs + i2_runs;
+    let totalMatchWickets = i1_wickets + i2_wickets;
+    
+    // Find top scorer
+    let allBatsmen = [...Object.values(i1_batsmenStats), ...Object.values(i2_batsmenStats)];
+    let topScorer = null;
+    allBatsmen.forEach(b => {
+        if (b && (!topScorer || (b.runs || 0) > (topScorer.runs || 0))) {
+            topScorer = b;
+        }
+    });
+    let topScorerText = (topScorer && (topScorer.runs || 0) > 0) ? `${toTitleCase(topScorer.name)} (${topScorer.runs})` : "—";
     
     let html = `
-        <div class="w-full text-center py-6 relative">
-            <h1 class="text-4xl font-black uppercase tracking-wider">MATCH SUMMARY</h1>
-            <button onclick="startNewMatch()" class="absolute right-8 top-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-2.5 px-6 rounded-xl shadow-lg shadow-emerald-600/20 transition-all active:scale-98">New Match</button>
-        </div>
-        
-        <div class="max-w-5xl mx-auto w-full px-8 flex flex-col gap-6">
+        <div class="max-w-6xl mx-auto w-full px-4 sm:px-6 py-8 flex flex-col gap-6 animate-fade-in">
             
-            <!-- Innings 1 -->
-            <div class="relative">
-                <div class="absolute left-0 top-0 w-24 h-24 bg-gray-300 rounded-xl border-4 border-black z-10 flex items-center justify-center overflow-hidden">
-                    ${t1 && t1.logo ? `<img src="${t1.logo}" class="w-full h-full object-contain bg-white">` : ''}
-                </div>
-                <div class="ml-20 mt-4 flex">
-                    <div class="bg-[#0a361e] text-white flex-1 h-12 rounded-l flex items-center pl-10 pr-4 justify-between">
-                        <div class="font-bold text-xl">${state.team_1_name}</div>
-                        <div class="text-lg">${i1_overs}</div>
+            <!-- Top App Bar -->
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 pb-2 border-b border-slate-200/80">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black shadow-sm">
+                        <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.45 1-1 1H7"/><path d="M14 14.66V17c0 .55.45 1 1 1h2"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
                     </div>
-                    <div class="bg-[#f3a918] text-black font-black text-2xl h-12 flex items-center justify-center rounded-r w-36" style="clip-path: polygon(12% 0, 100% 0, 100% 100%, 0% 100%); padding-left: 16px;">
-                        ${i1_score}
+                    <div>
+                        <h1 class="text-2xl font-black text-slate-900 heading-font tracking-tight">Match Summary</h1>
+                        <p class="text-xs font-semibold text-slate-500">${state.team_1_name} vs ${state.team_2_name} • ${state.max_overs || 20} Overs Match</p>
                     </div>
                 </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="undoFromSummary()" class="bg-white hover:bg-slate-50 text-slate-700 font-bold py-2.5 px-4 rounded-xl border border-slate-200/90 shadow-2xs transition-all active:scale-98 flex items-center gap-2 text-xs cursor-pointer">
+                        <svg class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                        <span>Undo Last Ball</span>
+                    </button>
+                    <button onclick="startNewMatch()" class="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-5 rounded-xl shadow-sm transition-all active:scale-98 flex items-center gap-2 text-xs cursor-pointer">
+                        <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        <span>New Match</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Hero Championship / Winner Banner -->
+            <div class="rounded-3xl p-6 md:p-8 text-white relative overflow-hidden shadow-xl" style="${heroBg}">
+                <div class="absolute -right-12 -bottom-12 w-64 h-64 rounded-full bg-white/10 pointer-events-none blur-2xl"></div>
+                <div class="absolute -left-12 -top-12 w-48 h-48 rounded-full bg-black/10 pointer-events-none blur-xl"></div>
                 
-                <div class="ml-24 mt-4 grid grid-cols-2 gap-8">
-                    <div class="flex flex-col gap-2">
-                        ${i1_bat.map(p => renderPlayerRow(p, true)).join("")}
+                <div class="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div class="flex items-center gap-5 text-center md:text-left">
+                        <div class="w-20 h-20 rounded-2xl bg-white/15 backdrop-blur-md border border-white/30 flex items-center justify-center shadow-lg shrink-0">
+                            ${winnerVisual}
+                        </div>
+                        <div>
+                            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-black uppercase tracking-wider mb-2">
+                                <span>${subBadge}</span>
+                            </div>
+                            <h2 class="text-3xl md:text-4xl font-black tracking-tight leading-tight">${resultTitle}</h2>
+                            <p class="text-white/90 text-sm md:text-base font-medium mt-1">${resultSubtitle}</p>
+                        </div>
                     </div>
-                    <div class="flex flex-col gap-2">
-                        ${i1_bowl.map(p => renderPlayerRow(p, false)).join("")}
+                    
+                    <div class="flex flex-col items-center md:items-end gap-2 shrink-0">
+                        <div class="px-5 py-3 rounded-2xl bg-black/20 backdrop-blur-md border border-white/20 text-center md:text-right">
+                            <div class="text-[11px] uppercase font-bold text-white/75 tracking-wider">Match Target</div>
+                            <div class="text-xl font-black text-white heading-font">${state.target ? `${state.target} Runs` : '1st Innings Setup'}</div>
+                        </div>
                     </div>
                 </div>
             </div>
             
-            <!-- Innings 2 -->
-            <div class="relative mt-4">
-                <div class="absolute left-0 top-0 w-24 h-24 bg-gray-300 rounded-xl border-4 border-black z-10 flex items-center justify-center overflow-hidden">
-                    ${t2 && t2.logo ? `<img src="${t2.logo}" class="w-full h-full object-contain bg-white">` : ''}
-                </div>
-                <div class="ml-20 mt-4 flex">
-                    <div class="bg-[#0a361e] text-white flex-1 h-12 rounded-l flex items-center pl-10 pr-4 justify-between">
-                        <div class="font-bold text-xl">${state.team_2_name}</div>
-                        <div class="text-lg">${i2_overs}</div>
+            <!-- Side-by-Side Innings Performance Cards -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                <!-- Innings 1 Card -->
+                <div class="bg-white rounded-3xl p-6 shadow-sm border transition-all flex flex-col gap-5" 
+                     style="border-color: ${hexToRgba(t1Theme.color, 0.28)}; box-shadow: 0 10px 30px -10px ${hexToRgba(t1Theme.color, 0.12)};">
+                    
+                    <!-- Innings 1 Header -->
+                    <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                        <div class="flex items-center gap-3">
+                            ${t1Theme.logo 
+                                ? `<img src="${t1Theme.logo}" class="w-12 h-12 rounded-2xl object-contain bg-white p-1 border border-slate-200/80 shadow-2xs">`
+                                : `<div class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white shadow-2xs" style="background: linear-gradient(135deg, ${t1Theme.color}, ${t1Theme.darkColor});">${t1Theme.name.charAt(0)}</div>`}
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="font-extrabold text-slate-800 text-lg leading-tight">${t1Theme.name}</h3>
+                                    <span class="w-2.5 h-2.5 rounded-full" style="background: ${t1Theme.color};"></span>
+                                </div>
+                                <div class="flex items-center gap-2 mt-0.5">
+                                    <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md" 
+                                          style="background: ${hexToRgba(t1Theme.color, 0.12)}; color: ${t1Theme.color};">1st Innings</span>
+                                    <span class="text-xs text-slate-400 font-medium">CRR: ${i1_crr}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-3xl font-black text-slate-900 heading-font">${i1_score}</div>
+                            <div class="text-xs font-bold text-slate-400">(${i1_overs} ov)</div>
+                        </div>
                     </div>
-                    <div class="bg-[#f3a918] text-black font-black text-2xl h-12 flex items-center justify-center rounded-r w-36" style="clip-path: polygon(12% 0, 100% 0, 100% 100%, 0% 100%); padding-left: 16px;">
-                        ${i2_score}
+                    
+                    <!-- Extras breakdown -->
+                    <div class="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-100 font-medium text-slate-600">
+                        <span class="font-semibold text-slate-500">Extras Conceded:</span>
+                        <span class="font-bold text-slate-800">${i1_ext.total} <span class="text-slate-400 font-normal">(${i1_ext.detail})</span></span>
                     </div>
+                    
+                    <!-- Innings 1 Top Batters -->
+                    <div>
+                        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">
+                            <span class="flex items-center gap-1.5">
+                                <span>🏏</span>
+                                <span>Top Batters</span>
+                            </span>
+                            <span class="text-[10px] text-slate-400 font-semibold lowercase">runs (balls)</span>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            ${i1_bat.length > 0 
+                                ? i1_bat.map(p => renderBatterRow(p, t1Theme)).join("") 
+                                : `<div class="py-5 text-center text-xs text-slate-400 italic bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">No batting recorded</div>`}
+                        </div>
+                    </div>
+                    
+                    <!-- Innings 1 Top Bowlers (from Team 2) -->
+                    <div class="mt-1 pt-4 border-t border-slate-100">
+                        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">
+                            <span class="flex items-center gap-1.5">
+                                <span>⚾</span>
+                                <span>Top Bowlers <span class="text-[10px] font-normal text-slate-400">(${t2Theme.name})</span></span>
+                            </span>
+                            <span class="text-[10px] text-slate-400 font-semibold lowercase">wkt / runs</span>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            ${i1_bowl.length > 0 
+                                ? i1_bowl.map(p => renderBowlerRow(p, t2Theme)).join("") 
+                                : `<div class="py-5 text-center text-xs text-slate-400 italic bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">No bowling recorded</div>`}
+                        </div>
+                    </div>
+                    
                 </div>
                 
-                <div class="ml-24 mt-4 grid grid-cols-2 gap-8">
-                    <div class="flex flex-col gap-2">
-                        ${i2_bat.map(p => renderPlayerRow(p, true)).join("")}
+                <!-- Innings 2 Card -->
+                <div class="bg-white rounded-3xl p-6 shadow-sm border transition-all flex flex-col gap-5" 
+                     style="border-color: ${hexToRgba(t2Theme.color, 0.28)}; box-shadow: 0 10px 30px -10px ${hexToRgba(t2Theme.color, 0.12)};">
+                    
+                    <!-- Innings 2 Header -->
+                    <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                        <div class="flex items-center gap-3">
+                            ${t2Theme.logo 
+                                ? `<img src="${t2Theme.logo}" class="w-12 h-12 rounded-2xl object-contain bg-white p-1 border border-slate-200/80 shadow-2xs">`
+                                : `<div class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white shadow-2xs" style="background: linear-gradient(135deg, ${t2Theme.color}, ${t2Theme.darkColor});">${t2Theme.name.charAt(0)}</div>`}
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="font-extrabold text-slate-800 text-lg leading-tight">${t2Theme.name}</h3>
+                                    <span class="w-2.5 h-2.5 rounded-full" style="background: ${t2Theme.color};"></span>
+                                </div>
+                                <div class="flex items-center gap-2 mt-0.5">
+                                    <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md" 
+                                          style="background: ${hexToRgba(t2Theme.color, 0.12)}; color: ${t2Theme.color};">2nd Innings</span>
+                                    <span class="text-xs text-slate-400 font-medium">${isEndedIn1 ? 'Did not bat' : `CRR: ${i2_crr}`}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-3xl font-black text-slate-900 heading-font">${i2_score}</div>
+                            <div class="text-xs font-bold text-slate-400">${!isEndedIn1 ? `(${i2_overs} ov)` : ''}</div>
+                        </div>
                     </div>
-                    <div class="flex flex-col gap-2">
-                        ${i2_bowl.map(p => renderPlayerRow(p, false)).join("")}
+                    
+                    <!-- Extras breakdown -->
+                    <div class="flex items-center justify-between text-xs px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-100 font-medium text-slate-600">
+                        <span class="font-semibold text-slate-500">Extras Conceded:</span>
+                        <span class="font-bold text-slate-800">${i2_ext.total} <span class="text-slate-400 font-normal">(${i2_ext.detail})</span></span>
                     </div>
+                    
+                    <!-- Innings 2 Top Batters -->
+                    <div>
+                        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">
+                            <span class="flex items-center gap-1.5">
+                                <span>🏏</span>
+                                <span>Top Batters</span>
+                            </span>
+                            <span class="text-[10px] text-slate-400 font-semibold lowercase">runs (balls)</span>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            ${i2_bat.length > 0 
+                                ? i2_bat.map(p => renderBatterRow(p, t2Theme)).join("") 
+                                : `<div class="py-5 text-center text-xs text-slate-400 italic bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">${isEndedIn1 ? 'Innings did not commence' : 'No batting recorded'}</div>`}
+                        </div>
+                    </div>
+                    
+                    <!-- Innings 2 Top Bowlers (from Team 1) -->
+                    <div class="mt-1 pt-4 border-t border-slate-100">
+                        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">
+                            <span class="flex items-center gap-1.5">
+                                <span>⚾</span>
+                                <span>Top Bowlers <span class="text-[10px] font-normal text-slate-400">(${t1Theme.name})</span></span>
+                            </span>
+                            <span class="text-[10px] text-slate-400 font-semibold lowercase">wkt / runs</span>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            ${i2_bowl.length > 0 
+                                ? i2_bowl.map(p => renderBowlerRow(p, t1Theme)).join("") 
+                                : `<div class="py-5 text-center text-xs text-slate-400 italic bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">${isEndedIn1 ? 'Innings did not commence' : 'No bowling recorded'}</div>`}
+                        </div>
+                    </div>
+                    
+                </div>
+                
+            </div>
+            
+            <!-- Match Highlights & Metrics Strip -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
+                <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col items-center justify-center text-center">
+                    <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Match Runs</span>
+                    <span class="text-2xl font-black text-slate-900 mt-1 heading-font">${totalMatchRuns}</span>
+                    <span class="text-[11px] text-slate-500 font-medium">${i1_runs} + ${i2_runs} runs</span>
+                </div>
+                
+                <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col items-center justify-center text-center">
+                    <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Wickets</span>
+                    <span class="text-2xl font-black text-slate-900 mt-1 heading-font">${totalMatchWickets}</span>
+                    <span class="text-[11px] text-slate-500 font-medium">${i1_wickets} + ${i2_wickets} wickets</span>
+                </div>
+                
+                <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col items-center justify-center text-center">
+                    <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Boundaries</span>
+                    <span class="text-2xl font-black text-slate-900 mt-1 heading-font">${totalBoundaries}</span>
+                    <span class="text-[11px] text-slate-500 font-medium">${totalFours} fours • ${totalSixes} sixes</span>
+                </div>
+                
+                <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col items-center justify-center text-center">
+                    <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Top Match Scorer</span>
+                    <span class="text-base font-black text-slate-900 mt-1 truncate max-w-full px-2">${topScorerText}</span>
+                    <span class="text-[11px] text-slate-500 font-medium">${totalExtras} total extras</span>
                 </div>
             </div>
             
-        </div>
-        
-        <!-- Bottom Bar -->
-        <div class="absolute bottom-0 left-0 w-full h-16 bg-[#0a361e] flex items-center justify-center text-white font-bold text-xl">
-            ${result}
+            <!-- Subtle Branding Footer -->
+            <div class="text-center py-2 text-xs text-slate-400 font-medium">
+                Live Cricket Scoring Engine • Hexcore Live
+            </div>
+            
         </div>
     `;
     
     summaryScreen.innerHTML = html;
 }
+
+window.undoFromSummary = async function() {
+    await eel.undo()();
+    document.getElementById("match-summary-screen").classList.add("hidden");
+    document.getElementById("scoring-screen").classList.remove("hidden");
+    refreshUI();
+};
 
 window.startNewMatch = function() {
     document.getElementById("match-summary-screen").classList.add("hidden");
@@ -660,13 +1561,20 @@ async function scoreWicket() {
     
     let batPlayers = [];
     let bowlPlayers = [];
-    if (batTeamId) batPlayers = await eel.get_players(batTeamId)();
-    if (bowlTeamId) bowlPlayers = await eel.get_players(bowlTeamId)();
+    if (batTeamId) {
+        let bpRes = await eel.get_players(batTeamId)();
+        batPlayers = Array.isArray(bpRes) ? bpRes : [];
+    }
+    if (bowlTeamId) {
+        let bwlRes = await eel.get_players(bowlTeamId)();
+        bowlPlayers = Array.isArray(bwlRes) ? bwlRes : [];
+    }
 
     let outBatsmen = state.out_batsmen || [];
     let batOptions = batPlayers
-        .map(p => p.full_name || p.first_name + " " + p.last_name)
-        .filter(name => name !== strikerName && name !== nonStrikerName && !outBatsmen.includes(name))
+        .map(p => (p && (p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : ""))) || "")
+        .map(s => s.trim())
+        .filter(name => name && name !== strikerName && name !== nonStrikerName && !outBatsmen.includes(name))
         .map(name => `<option value="${name}">${name}</option>`)
         .join("");
         
@@ -674,13 +1582,14 @@ async function scoreWicket() {
         let wkName = "";
         return bowlPlayers
             .filter(p => {
-                let name = p.full_name || p.first_name + " " + p.last_name;
+                if (!p) return false;
+                let name = ((p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : "")) || "").trim();
                 if (p.role === 'WK') wkName = name;
                 if (method === 'Stumped' && name === (state.bowler ? state.bowler.name : "")) return false;
-                return true;
+                return Boolean(name);
             })
             .map(p => {
-                let name = p.full_name || p.first_name + " " + p.last_name;
+                let name = ((p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : "")) || "").trim();
                 let sel = (method === 'Stumped' && name === wkName) ? "selected" : "";
                 return `<option value="${name}" ${sel}>${name}${p.role === 'WK' ? ' (WK)' : ''}</option>`;
             })
@@ -821,8 +1730,16 @@ window.submitExtraDirect = async function(type, runs, runType) {
 }
 
 async function scoreExtra(type) {
-    if (type === '5678' || type === 'bonus' || type === 'More') {
-        alert("Advanced scoring coming soon.");
+    if (type === '5789' || type === '5678') {
+        show5789Modal();
+        return;
+    }
+    if (type === 'More') {
+        showMoreOptionsModal();
+        return;
+    }
+    if (type === 'bonus') {
+        alert("Bonus runs scoring coming soon.");
         return;
     }
     
@@ -889,6 +1806,1185 @@ async function scoreExtra(type) {
     </div>`;
     showModal(html);
 }
+
+// =========================================================================
+// 5789 & MORE ACTIONS MODALS
+// =========================================================================
+
+window.show5789Modal = function() {
+    let runs = [5, 7, 8, 9, 10];
+    let buttonsHtml = runs.map(r => {
+        let isOdd = (r % 2 !== 0);
+        let note = isOdd ? 'Strike changes' : 'Strike retains';
+        return `
+            <button onclick="submit5789Run(${r})" class="group flex flex-col items-center justify-center p-4 bg-gradient-to-b from-[#f58133] to-[#e06d1d] hover:from-[#e06d1d] hover:to-[#c85b12] text-white rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95 border border-amber-300/30">
+                <span class="text-3xl font-black heading-font tracking-tight group-hover:scale-110 transition-transform">${r}</span>
+                <span class="text-[11px] font-semibold text-white/90 mt-1 uppercase tracking-wider">${r} Runs</span>
+                <span class="text-[10px] text-amber-100/80 font-normal">(${note})</span>
+            </button>
+        `;
+    }).join("");
+
+    let html = `
+        <div class="p-4 bg-slate-900 text-white font-bold text-base flex justify-between items-center border-b border-slate-800">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-[#f58133] flex items-center justify-center text-white text-xs font-black shadow-inner">
+                    5789
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Score Runs (5789)</div>
+                    <div class="text-[11px] text-slate-400 font-normal">Select batsman runs off the bat</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div class="grid grid-cols-5 gap-3">
+                ${buttonsHtml}
+            </div>
+            
+            <div class="p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                <svg class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>Recorded as bat runs for the striker. Strike rotation (swap) occurs automatically for odd runs (5, 7, 9).</span>
+            </div>
+            
+            <div class="flex justify-end pt-2 border-t border-slate-200">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Cancel</button>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[560px]");
+};
+
+window.submit5789Run = async function(r) {
+    closeModal();
+    await scoreBall(r);
+};
+
+window.showMoreOptionsModal = async function() {
+    let state = await eel.get_state()();
+    let isInnings1 = (!state.innings || state.innings === 1);
+    let currentInnings = state.innings || 1;
+    let targetText = state.target ? `${state.target} runs` : 'Not set';
+
+    let html = `
+        <div class="p-4 bg-slate-900 text-white font-bold text-base flex justify-between items-center border-b border-slate-800">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-slate-300 text-base font-black border border-slate-700">
+                    ⚡
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">More Options & Match Controls</div>
+                    <div class="text-[11px] text-slate-400 font-normal">Innings ${currentInnings} • ${state.team_1_name || 'Team 1'} vs ${state.team_2_name || 'Team 2'}</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 overflow-y-auto max-h-[82vh] flex flex-col gap-3">
+            
+            <!-- Grid of Actions -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                
+                <!-- Abandon Match -->
+                <button onclick="showConfirmAbandonModal()" class="flex flex-col text-left p-4 bg-white hover:bg-red-50/50 border border-slate-200 hover:border-red-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99]">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-100 text-red-700">Needs Confirmation</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-red-700 text-sm">Abandon Match</div>
+                    <div class="text-xs text-slate-500 mt-0.5">Immediately declare match abandoned with confirmation prompt</div>
+                </button>
+
+                <!-- End Innings -->
+                <button onclick="showConfirmEndInningsModal()" class="flex flex-col text-left p-4 bg-white hover:bg-amber-50/50 border border-slate-200 hover:border-amber-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99]">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Needs Confirmation</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-amber-700 text-sm">End Innings ${currentInnings}</div>
+                    <div class="text-xs text-slate-500 mt-0.5">${isInnings1 ? 'Conclude 1st innings & transition to 2nd innings setup' : 'Conclude 2nd innings & finalize match summary'}</div>
+                </button>
+
+                <!-- Penalty Runs -->
+                <button onclick="showPenaltyModal()" class="flex flex-col text-left p-4 bg-white hover:bg-purple-50/50 border border-slate-200 hover:border-purple-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99]">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">+5 Runs</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-purple-700 text-sm">Award Penalty Runs</div>
+                    <div class="text-xs text-slate-500 mt-0.5">Select the team who will receive 5 extra penalty runs</div>
+                </button>
+
+                <!-- Retired Hurt -->
+                <button onclick="showRetiredHurtModal()" class="flex flex-col text-left p-4 bg-white hover:bg-emerald-50/50 border border-slate-200 hover:border-emerald-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99]">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Player Sub</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-emerald-700 text-sm">Retired Hurt</div>
+                    <div class="text-xs text-slate-500 mt-0.5">Select retiring batsman &rarr; select new incoming batsman</div>
+                </button>
+
+                <!-- Change Target (Only available in 2nd Innings) -->
+                ${!isInnings1 ? `
+                <button onclick="showChangeTargetModal()" class="flex flex-col text-left p-4 bg-white hover:bg-blue-50/50 border border-slate-200 hover:border-blue-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99]">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Target: ${targetText}</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-blue-700 text-sm">Change Target</div>
+                    <div class="text-xs text-slate-500 mt-0.5">Manually set or revise target runs (DLS / rain rule / adjustments)</div>
+                </button>
+                ` : `
+                <div class="flex flex-col text-left p-4 bg-slate-100/80 border border-slate-200/80 rounded-2xl opacity-60 cursor-not-allowed select-none relative">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-slate-200 text-slate-400">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">Unavailable in 1st Innings</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-500 text-sm">Change Target</div>
+                    <div class="text-xs text-slate-400 mt-0.5">Target can only be set or changed during the 2nd innings</div>
+                </div>
+                `}
+
+                <!-- Overs / Format / Wickets -->
+                ${isInnings1 ? `
+                <button onclick="showFormatModal()" class="flex flex-col text-left p-4 bg-white hover:bg-teal-50/50 border border-slate-200 hover:border-teal-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99]">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-teal-100 text-teal-600 group-hover:bg-teal-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-teal-100 text-teal-700">${state.max_overs || 20} Ov / ${state.max_wickets || 10} Wkt</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-teal-700 text-sm">Overs / Format / Wickets</div>
+                    <div class="text-xs text-slate-500 mt-0.5">Select total match overs and wickets for this match</div>
+                </button>
+                ` : `
+                <div class="flex flex-col text-left p-4 bg-slate-100/80 border border-slate-200/80 rounded-2xl opacity-60 cursor-not-allowed select-none relative">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-slate-200 text-slate-400">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">Disabled in 2nd Innings</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-500 text-sm">Overs / Format / Wickets</div>
+                    <div class="text-xs text-slate-400 mt-0.5">Format cannot be modified after the 1st innings has completed</div>
+                </div>
+                `}
+
+            </div>
+
+            <div class="flex justify-end pt-3 border-t border-slate-200 mt-2">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Close</button>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[620px]");
+};
+
+window.showConfirmAbandonModal = async function() {
+    let state = await eel.get_state()();
+    let currentInn = state.innings || 1;
+    let battingTeam = currentInn === 1 ? state.team_1_name : state.team_2_name;
+
+    let reasons = [
+        "Rain / Wet Outfield",
+        "Bad Light / Darkness",
+        "Pitch / Ground Unfit",
+        "Player Injury / Medical Emergency",
+        "Technical / Equipment Issue",
+        "Mutual Agreement / Forfeit"
+    ];
+    let reasonOptions = reasons.map(r => `<option value="${r}">${r}</option>`).join("");
+
+    let html = `
+        <div class="p-4 bg-gradient-to-r from-red-600 to-rose-700 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                    <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Confirm Match Abandonment</div>
+                    <div class="text-[11px] text-red-100 font-normal">Immediate conclusion of match scoring</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            <!-- Current Status Box -->
+            <div class="p-3.5 bg-red-50/80 border border-red-200/90 rounded-2xl flex items-center justify-between">
+                <div>
+                    <div class="text-xs font-bold text-red-950 uppercase tracking-wider">Innings ${currentInn} • ${state.team_1_name} vs ${state.team_2_name}</div>
+                    <div class="text-xs text-red-800 mt-0.5">Batting: <strong>${battingTeam}</strong> • Score: <strong>${state.runs}/${state.wickets}</strong> (${state.overs_completed}.${state.balls_this_over} ov)</div>
+                </div>
+                <div class="px-2.5 py-1 rounded-full bg-red-200/80 text-red-900 text-[10px] font-black tracking-wider uppercase">
+                    Unfinished
+                </div>
+            </div>
+
+            <!-- Reason Selector -->
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Official Abandonment Reason</label>
+                <select id="abandon-reason-select" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-red-500 focus:outline-none shadow-sm">
+                    ${reasonOptions}
+                    <option value="Custom">+ Other Reason...</option>
+                </select>
+                <input id="abandon-custom-reason" type="text" placeholder="Specify custom reason..." class="hidden mt-2 border border-slate-300 rounded-xl p-3 w-full bg-white font-medium text-slate-800 text-sm focus:ring-2 focus:ring-red-500 focus:outline-none shadow-sm" />
+            </div>
+
+            <!-- Confirmation Notice -->
+            <div class="p-3.5 bg-amber-50 border border-amber-200/80 rounded-xl text-xs text-amber-950 flex items-start gap-2.5">
+                <svg class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <div>
+                    <strong>Action cannot be undone automatically:</strong> Match status will be set to <strong>ABANDONED</strong> and active scoring screen will be finalized to the official summary.
+                </div>
+            </div>
+            
+            <div class="flex justify-between items-center pt-3 border-t border-slate-200 mt-1">
+                <button onclick="showMoreOptionsModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+                    <span>Back</span>
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Cancel</button>
+                    <button onclick="submitAbandonMatch()" class="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-red-600/30 transition-all active:scale-98 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Yes, Abandon Match</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[500px]");
+
+    let sel = document.getElementById("abandon-reason-select");
+    let custom = document.getElementById("abandon-custom-reason");
+    if (sel && custom) {
+        sel.onchange = () => {
+            if (sel.value === "Custom") {
+                custom.classList.remove("hidden");
+                custom.focus();
+            } else {
+                custom.classList.add("hidden");
+            }
+        };
+    }
+};
+
+window.submitAbandonMatch = async function() {
+    let sel = document.getElementById("abandon-reason-select");
+    let custom = document.getElementById("abandon-custom-reason");
+    let reason = sel ? (sel.value === "Custom" ? (custom.value.trim() || "Abandoned") : sel.value) : "Abandoned";
+    closeModal();
+    await eel.abandon_match()();
+    refreshUI();
+};
+
+window.showConfirmEndInningsModal = async function() {
+    let state = await eel.get_state()();
+    let isInnings1 = (!state.innings || state.innings === 1);
+    let target = state.runs + 1;
+
+    let html = `
+        <div class="p-4 bg-gradient-to-r from-amber-600 to-amber-700 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                    <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">${isInnings1 ? 'Conclude 1st Innings' : 'Conclude 2nd Innings & Finalize Match'}</div>
+                    <div class="text-[11px] text-amber-100 font-normal">${state.team_1_name} vs ${state.team_2_name}</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            ${isInnings1 ? `
+                <div class="p-4 bg-amber-50 border border-amber-200/90 rounded-2xl flex flex-col gap-3">
+                    <div class="flex items-center justify-between border-b border-amber-200/70 pb-2.5">
+                        <div>
+                            <div class="text-xs font-bold uppercase tracking-wider text-amber-900">${state.team_1_name} (1st Innings)</div>
+                            <div class="text-2xl font-black text-amber-950 mt-0.5">${state.runs}/${state.wickets} <span class="text-sm font-semibold text-amber-800">(${state.overs_completed}.${state.balls_this_over} ov)</span></div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-[10px] font-bold uppercase tracking-wider text-amber-700">Calculated Target</div>
+                            <div class="text-2xl font-black text-emerald-700 mt-0.5">${target} <span class="text-xs font-semibold text-emerald-800">runs</span></div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="text-xs font-bold uppercase tracking-wider text-slate-700">Adjust Target (Optional)</label>
+                            <span class="text-[11px] text-slate-500 font-medium">For DLS or penalty revisions</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="adjustEndInningsTarget(-5)" class="px-2.5 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs">-5</button>
+                            <button type="button" onclick="adjustEndInningsTarget(-1)" class="px-2.5 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs">-1</button>
+                            <input id="end-innings-target-input" type="number" min="1" value="${target}" class="flex-1 border border-slate-300 rounded-xl p-2.5 text-center font-extrabold text-slate-900 text-lg bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                            <button type="button" onclick="adjustEndInningsTarget(1)" class="px-2.5 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs">+1</button>
+                            <button type="button" onclick="adjustEndInningsTarget(5)" class="px-2.5 py-2 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-xs">+5</button>
+                        </div>
+                        <div id="end-innings-equation-preview" class="text-xs text-amber-900 font-medium mt-2 bg-amber-100/70 p-2 rounded-lg">
+                            ${state.team_2_name} will need <strong>${target} runs</strong> in <strong>${state.max_overs} overs</strong> (RRR: ${(target / (state.max_overs || 20)).toFixed(2)})
+                        </div>
+                    </div>
+                </div>
+            ` : `
+                <div class="p-4 bg-amber-50 border border-amber-200/90 rounded-2xl flex flex-col gap-2.5">
+                    <div class="text-xs font-bold uppercase tracking-wider text-amber-900">Final Innings 2 Score</div>
+                    <div class="text-3xl font-black text-amber-950">${state.runs}/${state.wickets} <span class="text-base font-semibold text-amber-800">(${state.overs_completed}.${state.balls_this_over} ov)</span></div>
+                    <div class="text-xs text-amber-900 mt-1">
+                        Target was: <strong>${state.target || (state.runs + 1)}</strong>. Confirming will finalize all statistics and open the official match summary.
+                    </div>
+                </div>
+            `}
+            
+            <div class="flex justify-between items-center pt-3 border-t border-slate-200 mt-1">
+                <button onclick="showMoreOptionsModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+                    <span>Back</span>
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Cancel</button>
+                    <button onclick="submitEndInnings()" class="px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-amber-600/30 transition-all active:scale-98 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>${isInnings1 ? 'Conclude Innings 1' : 'Conclude Match'}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[520px]");
+
+    let inp = document.getElementById("end-innings-target-input");
+    if (inp) {
+        inp.oninput = () => {
+            let val = parseInt(inp.value) || 1;
+            let preview = document.getElementById("end-innings-equation-preview");
+            if (preview) {
+                let rrr = (val / (state.max_overs || 20)).toFixed(2);
+                preview.innerHTML = `${state.team_2_name} will need <strong>${val} runs</strong> in <strong>${state.max_overs} overs</strong> (RRR: ${rrr})`;
+            }
+        };
+    }
+};
+
+window.adjustEndInningsTarget = function(delta) {
+    let inp = document.getElementById("end-innings-target-input");
+    if (!inp) return;
+    let current = parseInt(inp.value) || 1;
+    let next = Math.max(1, current + delta);
+    inp.value = next;
+    inp.oninput();
+};
+
+window.submitEndInnings = async function() {
+    let inp = document.getElementById("end-innings-target-input");
+    let state = await eel.get_state()();
+    let isInnings1 = (!state.innings || state.innings === 1);
+    
+    if (isInnings1 && inp) {
+        let val = parseInt(inp.value);
+        if (!isNaN(val) && val > 0) {
+            await eel.set_target(val)();
+        }
+    }
+    closeModal();
+    await eel.end_current_innings()();
+    refreshUI();
+};
+
+let selectedPenaltyTeamName = "";
+
+window.showPenaltyModal = async function() {
+    let state = await eel.get_state()();
+    let team1 = state.team_1_name || "Team 1";
+    let team2 = state.team_2_name || "Team 2";
+    let currentInn = state.innings || 1;
+    let isT1Batting = (currentInn === 1);
+    
+    // Default selected team: batting team
+    selectedPenaltyTeamName = isT1Batting ? team1 : team2;
+
+    let reasons = [
+        "Ball strikes fielder's helmet (+5)",
+        "Unfair play / Deliberate time wasting (+5)",
+        "Fielder distraction / illegal fielding (+5)",
+        "Pitch damage / running on the wicket (+5)",
+        "General umpire disciplinary award (+5)"
+    ];
+
+    let reasonsHtml = reasons.map((r, i) => `
+        <button type="button" onclick="selectPenaltyReason('${r}', this)" class="penalty-reason-chip text-left text-xs p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-purple-50/60 font-medium text-slate-700 transition-all ${i === 0 ? 'border-purple-600 bg-purple-50/80 text-purple-900 font-bold' : ''}">
+            ${r}
+        </button>
+    `).join("");
+
+    let t1Score = isT1Batting ? state.runs : (state.bowling_team_penalty || 0);
+    let t2Score = !isT1Batting ? state.runs : (state.bowling_team_penalty || 0);
+
+    let html = `
+        <div class="p-4 bg-gradient-to-r from-purple-700 to-indigo-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                    <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Award Penalty (+5 Runs)</div>
+                    <div class="text-[11px] text-purple-200 font-normal">MCC Law 41/42 • Award 5 extra runs without consuming legal ball</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Step 1: Select Team To Receive +5 Runs</label>
+                <div class="grid grid-cols-2 gap-3">
+                    
+                    <!-- Team 1 Card -->
+                    <div id="penalty-card-t1" onclick="selectPenaltyTeam('${team1}')" class="cursor-pointer p-4 rounded-2xl border-2 transition-all flex flex-col justify-between ${selectedPenaltyTeamName === team1 ? 'border-purple-600 bg-purple-50/80 shadow-md ring-2 ring-purple-400/30' : 'border-slate-200 bg-white hover:border-slate-300'}">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${isT1Batting ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${isT1Batting ? 'Batting' : 'Bowling'}</span>
+                            <div id="penalty-check-t1" class="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs ${selectedPenaltyTeamName === team1 ? '' : 'hidden'}">✓</div>
+                        </div>
+                        <div class="my-2">
+                            <div class="font-black text-slate-900 text-base truncate">${team1}</div>
+                            <div class="text-xs text-slate-500 mt-0.5">Current: <strong>${t1Score}</strong> runs</div>
+                        </div>
+                        <div class="text-xs font-extrabold text-purple-700 bg-purple-100/80 rounded-lg py-1 text-center">
+                            ➔ Next: ${t1Score + 5} runs (+5)
+                        </div>
+                    </div>
+
+                    <!-- Team 2 Card -->
+                    <div id="penalty-card-t2" onclick="selectPenaltyTeam('${team2}')" class="cursor-pointer p-4 rounded-2xl border-2 transition-all flex flex-col justify-between ${selectedPenaltyTeamName === team2 ? 'border-purple-600 bg-purple-50/80 shadow-md ring-2 ring-purple-400/30' : 'border-slate-200 bg-white hover:border-slate-300'}">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${!isT1Batting ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${!isT1Batting ? 'Batting' : 'Bowling'}</span>
+                            <div id="penalty-check-t2" class="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs ${selectedPenaltyTeamName === team2 ? '' : 'hidden'}">✓</div>
+                        </div>
+                        <div class="my-2">
+                            <div class="font-black text-slate-900 text-base truncate">${team2}</div>
+                            <div class="text-xs text-slate-500 mt-0.5">Current: <strong>${t2Score}</strong> runs</div>
+                        </div>
+                        <div class="text-xs font-extrabold text-purple-700 bg-purple-100/80 rounded-lg py-1 text-center">
+                            ➔ Next: ${t2Score + 5} runs (+5)
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Reason Selector -->
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Step 2: Penalty Reason</label>
+                <div class="flex flex-col gap-1.5 max-h-36 overflow-y-auto pr-1">
+                    ${reasonsHtml}
+                </div>
+            </div>
+
+            <!-- Scoring Rule Notice -->
+            <div class="p-3 bg-purple-50 border border-purple-200/80 rounded-xl text-xs text-purple-950 flex items-start gap-2">
+                <svg class="w-4 h-4 text-purple-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span>5 runs will be credited under Penalty extras. Does not count as a ball faced or legal delivery.</span>
+            </div>
+            
+            <div class="flex justify-between items-center pt-3 border-t border-slate-200 mt-1">
+                <button onclick="showMoreOptionsModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+                    <span>Back</span>
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Cancel</button>
+                    <button id="btn-confirm-penalty" onclick="submitPenaltyRuns()" class="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-purple-600/30 transition-all active:scale-98 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span id="btn-confirm-penalty-text">Award +5 Runs to ${selectedPenaltyTeamName}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[540px]");
+};
+
+window.selectPenaltyTeam = function(teamName) {
+    selectedPenaltyTeamName = teamName;
+    let card1 = document.getElementById("penalty-card-t1");
+    let card2 = document.getElementById("penalty-card-t2");
+    let check1 = document.getElementById("penalty-check-t1");
+    let check2 = document.getElementById("penalty-check-t2");
+    let btnText = document.getElementById("btn-confirm-penalty-text");
+
+    let isT1 = (card1 && card1.getAttribute("onclick") && card1.getAttribute("onclick").includes(teamName));
+
+    if (isT1) {
+        if (card1) card1.className = "cursor-pointer p-4 rounded-2xl border-2 transition-all flex flex-col justify-between border-purple-600 bg-purple-50/80 shadow-md ring-2 ring-purple-400/30";
+        if (card2) card2.className = "cursor-pointer p-4 rounded-2xl border-2 transition-all flex flex-col justify-between border-slate-200 bg-white hover:border-slate-300";
+        if (check1) check1.classList.remove("hidden");
+        if (check2) check2.classList.add("hidden");
+    } else {
+        if (card2) card2.className = "cursor-pointer p-4 rounded-2xl border-2 transition-all flex flex-col justify-between border-purple-600 bg-purple-50/80 shadow-md ring-2 ring-purple-400/30";
+        if (card1) card1.className = "cursor-pointer p-4 rounded-2xl border-2 transition-all flex flex-col justify-between border-slate-200 bg-white hover:border-slate-300";
+        if (check2) check2.classList.remove("hidden");
+        if (check1) check1.classList.add("hidden");
+    }
+
+    if (btnText) {
+        btnText.innerText = `Award +5 Runs to ${teamName}`;
+    }
+};
+
+window.selectPenaltyReason = function(reason, btn) {
+    document.querySelectorAll(".penalty-reason-chip").forEach(el => {
+        el.className = "penalty-reason-chip text-left text-xs p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-purple-50/60 font-medium text-slate-700 transition-all";
+    });
+    btn.className = "penalty-reason-chip text-left text-xs p-2.5 rounded-xl border border-purple-600 bg-purple-50/80 font-bold text-purple-900 transition-all shadow-sm";
+};
+
+window.submitPenaltyRuns = async function() {
+    if (!selectedPenaltyTeamName) {
+        alert("Please select a team.");
+        return;
+    }
+    closeModal();
+    await eel.award_penalty_runs(selectedPenaltyTeamName)();
+    refreshUI();
+};
+
+let selectedRetirePlayerType = "Striker";
+
+window.showRetiredHurtModal = async function() {
+    let state = await eel.get_state()();
+    selectedRetirePlayerType = "Striker";
+
+    let strikerName = state.striker ? state.striker.name : "Striker";
+    let strikerRuns = state.striker ? state.striker.runs : 0;
+    let strikerBalls = state.striker ? state.striker.balls : 0;
+    let striker4s = state.striker ? (state.striker["4s"] || 0) : 0;
+    let striker6s = state.striker ? (state.striker["6s"] || 0) : 0;
+
+    let nonStrikerName = state.non_striker ? state.non_striker.name : "Non-Striker";
+    let nonStrikerRuns = state.non_striker ? state.non_striker.runs : 0;
+    let nonStrikerBalls = state.non_striker ? state.non_striker.balls : 0;
+    let nonStriker4s = state.non_striker ? (state.non_striker["4s"] || 0) : 0;
+    let nonStriker6s = state.non_striker ? (state.non_striker["6s"] || 0) : 0;
+
+    let batTeamId = state.batting_team_id;
+    if (!batTeamId) {
+        let allTeams = await eel.get_teams()();
+        let batTeam = allTeams.find(t => t.name === (state.innings === 1 ? state.team_1_name : state.team_2_name));
+        if (batTeam) batTeamId = batTeam.id;
+    }
+
+    let batPlayers = [];
+    if (batTeamId) {
+        try {
+            batPlayers = await eel.get_players(batTeamId)();
+        } catch(e) {
+            console.error("Error fetching bat players:", e);
+        }
+    }
+
+    let outBatsmen = state.out_batsmen || [];
+    
+    // Check if any previously retired hurt batsmen can resume!
+    let previouslyRetiredHurt = [];
+    if (state.batsmen_stats) {
+        Object.keys(state.batsmen_stats).forEach(name => {
+            let st = state.batsmen_stats[name];
+            if (st && st.status === "retired hurt" && name !== strikerName && name !== nonStrikerName) {
+                previouslyRetiredHurt.push(name);
+            }
+        });
+    }
+
+    let availableSquad = batPlayers
+        .map(p => p.full_name || (p.first_name + " " + p.last_name).trim())
+        .filter(name => name !== strikerName && name !== nonStrikerName && (!outBatsmen.includes(name) || previouslyRetiredHurt.includes(name)));
+
+    let optionsHtml = "";
+    if (previouslyRetiredHurt.length > 0) {
+        optionsHtml += `<optgroup label="Eligible to Resume Innings">`;
+        previouslyRetiredHurt.forEach(name => {
+            let stats = state.batsmen_stats[name] || {};
+            optionsHtml += `<option value="${name}">↩ ${name} (${stats.runs || 0} runs - Resume Innings)</option>`;
+        });
+        optionsHtml += `</optgroup>`;
+    }
+
+    if (availableSquad.length > 0) {
+        optionsHtml += `<optgroup label="Remaining Squad Batsmen">`;
+        availableSquad.forEach(name => {
+            if (!previouslyRetiredHurt.includes(name)) {
+                optionsHtml += `<option value="${name}">${name}</option>`;
+            }
+        });
+        optionsHtml += `</optgroup>`;
+    }
+
+    optionsHtml += `<optgroup label="Custom Batsman">`;
+    optionsHtml += `<option value="__custom__">+ Enter Custom Batsman Name...</option>`;
+    optionsHtml += `</optgroup>`;
+
+    let html = `
+        <div class="p-4 bg-gradient-to-r from-emerald-700 to-teal-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                    <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Batsman Retired Hurt / Sub</div>
+                    <div class="text-[11px] text-emerald-200 font-normal">Player leaves the crease due to illness or injury</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            
+            <!-- Step 1: Retiring Batsman Selection Cards -->
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Step 1: Select Retiring Batsman</label>
+                <div class="grid grid-cols-2 gap-3">
+                    
+                    <!-- Striker Card -->
+                    <div id="retire-card-striker" onclick="selectRetiringPlayer('Striker')" class="cursor-pointer p-4 rounded-2xl border-2 border-emerald-600 bg-emerald-50/80 shadow-md ring-2 ring-emerald-400/30 transition-all flex flex-col justify-between">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-200/90 text-emerald-900">Striker *</span>
+                            <div id="retire-check-striker" class="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">✓</div>
+                        </div>
+                        <div class="my-2">
+                            <div class="font-black text-slate-900 text-base truncate">${strikerName}</div>
+                            <div class="text-xs text-slate-500 mt-0.5">${strikerRuns} runs (${strikerBalls} balls) • 4s: ${striker4s}, 6s: ${striker6s}</div>
+                        </div>
+                        <div class="text-[11px] font-semibold text-emerald-800">
+                            SR: ${strikerBalls > 0 ? (strikerRuns / strikerBalls * 100).toFixed(1) : '0.0'}
+                        </div>
+                    </div>
+
+                    <!-- Non-Striker Card -->
+                    <div id="retire-card-nonstriker" onclick="selectRetiringPlayer('Non-Striker')" class="cursor-pointer p-4 rounded-2xl border-2 border-slate-200 bg-white hover:border-slate-300 transition-all flex flex-col justify-between">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">Non-Striker</span>
+                            <div id="retire-check-nonstriker" class="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs hidden">✓</div>
+                        </div>
+                        <div class="my-2">
+                            <div class="font-black text-slate-900 text-base truncate">${nonStrikerName}</div>
+                            <div class="text-xs text-slate-500 mt-0.5">${nonStrikerRuns} runs (${nonStrikerBalls} balls) • 4s: ${nonStriker4s}, 6s: ${nonStriker6s}</div>
+                        </div>
+                        <div class="text-[11px] font-semibold text-slate-600">
+                            SR: ${nonStrikerBalls > 0 ? (nonStrikerRuns / nonStrikerBalls * 100).toFixed(1) : '0.0'}
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Step 2: New Batsman -->
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Step 2: Incoming Replacement Batsman</label>
+                <select id="retire-newbat-select" onchange="toggleRetireCustomInput(this.value)" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+                    ${optionsHtml}
+                </select>
+                <input id="retire-newbat-custom" type="text" placeholder="Type new batsman name here..." class="hidden mt-2 border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+            </div>
+
+            <div class="p-3 bg-emerald-50 border border-emerald-200/80 rounded-xl text-xs text-emerald-950 flex items-start gap-2">
+                <svg class="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span>The player will be marked as "retired hurt" (not out). They are allowed by cricket law to resume their innings at the fall of a future wicket.</span>
+            </div>
+            
+            <div class="flex justify-between items-center pt-3 border-t border-slate-200 mt-1">
+                <button onclick="showMoreOptionsModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+                    <span>Back</span>
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Cancel</button>
+                    <button onclick="submitRetiredHurt()" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/30 transition-all active:scale-98 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Confirm Substitution</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[540px]");
+};
+
+window.selectRetiringPlayer = function(type) {
+    selectedRetirePlayerType = type;
+    let cardS = document.getElementById("retire-card-striker");
+    let cardN = document.getElementById("retire-card-nonstriker");
+    let checkS = document.getElementById("retire-check-striker");
+    let checkN = document.getElementById("retire-check-nonstriker");
+
+    if (type === "Striker") {
+        if (cardS) cardS.className = "cursor-pointer p-4 rounded-2xl border-2 border-emerald-600 bg-emerald-50/80 shadow-md ring-2 ring-emerald-400/30 transition-all flex flex-col justify-between";
+        if (cardN) cardN.className = "cursor-pointer p-4 rounded-2xl border-2 border-slate-200 bg-white hover:border-slate-300 transition-all flex flex-col justify-between";
+        if (checkS) checkS.classList.remove("hidden");
+        if (checkN) checkN.classList.add("hidden");
+    } else {
+        if (cardN) cardN.className = "cursor-pointer p-4 rounded-2xl border-2 border-emerald-600 bg-emerald-50/80 shadow-md ring-2 ring-emerald-400/30 transition-all flex flex-col justify-between";
+        if (cardS) cardS.className = "cursor-pointer p-4 rounded-2xl border-2 border-slate-200 bg-white hover:border-slate-300 transition-all flex flex-col justify-between";
+        if (checkN) checkN.classList.remove("hidden");
+        if (checkS) checkS.classList.add("hidden");
+    }
+};
+
+window.toggleRetireCustomInput = function(val) {
+    let inp = document.getElementById("retire-newbat-custom");
+    if (!inp) return;
+    if (val === "__custom__") {
+        inp.classList.remove("hidden");
+        inp.focus();
+    } else {
+        inp.classList.add("hidden");
+    }
+};
+
+window.submitRetiredHurt = async function() {
+    let playerType = selectedRetirePlayerType || "Striker";
+    let sel = document.getElementById("retire-newbat-select");
+    let customInp = document.getElementById("retire-newbat-custom");
+    let newBatName = sel ? sel.value : "";
+    if (newBatName === "__custom__") {
+        newBatName = customInp ? customInp.value.trim() : "";
+    }
+    if (!newBatName || newBatName.trim() === "") {
+        alert("Please select or enter the new batsman's name.");
+        return;
+    }
+
+    closeModal();
+    await eel.retire_hurt(playerType, newBatName)();
+    refreshUI();
+};
+
+window.showChangeTargetModal = async function() {
+    let state = await eel.get_state()();
+    if (!state.innings || state.innings === 1) {
+        alert("Change Target is unavailable during the 1st innings. Targets are only active in the 2nd innings.");
+        return;
+    }
+    let currentTarget = state.target != null ? state.target : "Not Set";
+    let defaultVal = state.target != null ? state.target : (state.runs + 1);
+    let bpo = state.balls_per_over || 6;
+    let totalBalls = (state.max_overs || 20) * bpo;
+    let bowledBalls = (state.overs_completed || 0) * bpo + (state.balls_this_over || 0);
+    let ballsRemaining = Math.max(0, totalBalls - bowledBalls);
+
+    let html = `
+        <div class="p-4 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                    <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Change Target Runs</div>
+                    <div class="text-[11px] text-blue-100 font-normal">Revise victory target for DLS rain calculation or manual adjustment</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            
+            <!-- Match Status Preview -->
+            <div class="grid grid-cols-3 gap-2 p-3 bg-blue-50/80 border border-blue-200/90 rounded-2xl text-center">
+                <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-blue-600">Current Target</div>
+                    <div class="text-lg font-black text-blue-950 mt-0.5">${currentTarget}</div>
+                </div>
+                <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Current Score</div>
+                    <div class="text-lg font-black text-slate-900 mt-0.5">${state.runs}/${state.wickets}</div>
+                </div>
+                <div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Balls Left</div>
+                    <div class="text-lg font-black text-slate-900 mt-0.5">${ballsRemaining} b</div>
+                </div>
+            </div>
+
+            <!-- Target Input & Steppers -->
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">New Target Runs to Win</label>
+                
+                <div class="flex items-center gap-2">
+                    <input id="change-target-input" type="number" min="1" max="1000" value="${defaultVal}" class="border border-slate-300 rounded-xl p-3 flex-1 bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none font-black text-slate-900 text-2xl tracking-wide text-center shadow-inner">
+                </div>
+
+                <!-- Quick adjustment buttons -->
+                <div class="grid grid-cols-6 gap-2 mt-2.5">
+                    <button type="button" onclick="adjustTargetInput(-10)" class="py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition-all">-10</button>
+                    <button type="button" onclick="adjustTargetInput(-5)" class="py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition-all">-5</button>
+                    <button type="button" onclick="adjustTargetInput(-1)" class="py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition-all">-1</button>
+                    <button type="button" onclick="adjustTargetInput(1)" class="py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition-all">+1</button>
+                    <button type="button" onclick="adjustTargetInput(5)" class="py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition-all">+5</button>
+                    <button type="button" onclick="adjustTargetInput(10)" class="py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-bold transition-all">+10</button>
+                </div>
+            </div>
+
+            <!-- Live Dynamic Impact Equation -->
+            <div id="target-live-preview" class="p-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-700 shadow-sm flex flex-col gap-1">
+                <!-- Rendered dynamically -->
+            </div>
+            
+            <div class="flex justify-between items-center pt-3 border-t border-slate-200 mt-1">
+                <button onclick="showMoreOptionsModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+                    <span>Back</span>
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors">Cancel</button>
+                    <button onclick="submitChangeTarget()" class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-blue-600/30 transition-all active:scale-98 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Update Target</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[500px]");
+
+    let inp = document.getElementById("change-target-input");
+    if (inp) {
+        inp.oninput = () => updateTargetPreview(state);
+        updateTargetPreview(state);
+    }
+};
+
+window.adjustTargetInput = function(delta) {
+    let inp = document.getElementById("change-target-input");
+    if (!inp) return;
+    let current = parseInt(inp.value) || 1;
+    let next = Math.max(1, current + delta);
+    inp.value = next;
+    inp.oninput();
+};
+
+window.updateTargetPreview = function(state) {
+    let inp = document.getElementById("change-target-input");
+    let preview = document.getElementById("target-live-preview");
+    if (!inp || !preview) return;
+
+    let target = parseInt(inp.value) || 0;
+    let bpo = state.balls_per_over || 6;
+    let totalBalls = (state.max_overs || 20) * bpo;
+    let bowledBalls = (state.overs_completed || 0) * bpo + (state.balls_this_over || 0);
+    let ballsRemaining = Math.max(0, totalBalls - bowledBalls);
+    let runsNeeded = target - state.runs;
+    let rrr = (ballsRemaining > 0 && runsNeeded > 0) ? ((runsNeeded / ballsRemaining) * bpo).toFixed(2) : "0.00";
+    let chasingTeam = state.team_2_name || "Chasing Team";
+
+    if (state.innings === 2) {
+        if (runsNeeded <= 0) {
+            preview.innerHTML = `
+                <div class="text-amber-800 font-bold flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span>Target reached (${state.runs} >= ${target})</span>
+                </div>
+                <div class="text-[11px] text-slate-600">Setting this target will immediately conclude the match with ${chasingTeam} winning!</div>
+            `;
+        } else {
+            preview.innerHTML = `
+                <div class="font-extrabold text-blue-900 text-sm">
+                    ${chasingTeam} need <strong>${runsNeeded} runs</strong> from <strong>${ballsRemaining} balls</strong>
+                </div>
+                <div class="text-[11px] text-slate-500 font-medium">
+                    Required Run Rate (RRR): <strong class="text-blue-700">${rrr}</strong> runs per over
+                </div>
+            `;
+        }
+    } else {
+        preview.innerHTML = `
+            <div class="font-bold text-slate-800 text-sm">Target set to <strong>${target} runs</strong></div>
+            <div class="text-[11px] text-slate-500">Innings 1 is in progress. Chasing team will face a target of ${target} in Innings 2.</div>
+        `;
+    }
+};
+
+window.submitChangeTarget = async function() {
+    let state = await eel.get_state()();
+    if (!state.innings || state.innings === 1) {
+        alert("Target can only be changed during the 2nd innings.");
+        closeModal();
+        return;
+    }
+    let inp = document.getElementById("change-target-input");
+    let val = parseInt(inp.value);
+    if (isNaN(val) || val <= 0) {
+        alert("Please enter a valid positive target number.");
+        return;
+    }
+    closeModal();
+    await eel.change_target(val)();
+    refreshUI();
+};
+
+window.showFormatModal = async function() {
+    let state = await eel.get_state()();
+    if (state.innings && state.innings > 1) {
+        alert("Match format (overs/wickets) can only be changed during the 1st innings.");
+        return;
+    }
+
+    let currentPlayedOvers = (state.overs_completed || 0) + ((state.balls_this_over || 0) > 0 ? 1 : 0);
+    let minAllowedOvers = Math.max(1, currentPlayedOvers);
+    let currentWicketsLost = state.wickets || 0;
+    let minAllowedWickets = Math.max(1, currentWicketsLost);
+
+    let defaultOvers = Math.max(state.max_overs || 20, minAllowedOvers);
+    let defaultWickets = Math.max(state.max_wickets || 10, minAllowedWickets);
+
+    let presets = [
+        { label: "T20 (20 ov, 10 wkt)", overs: 20, wickets: 10 },
+        { label: "T10 (10 ov, 10 wkt)", overs: 10, wickets: 10 },
+        { label: "50 Overs (ODI)", overs: 50, wickets: 10 },
+        { label: "15 Overs", overs: 15, wickets: 10 },
+        { label: "5 Overs Blitz", overs: 5, wickets: 10 },
+        { label: "8 Wickets Match", overs: defaultOvers, wickets: 8 }
+    ];
+
+    let presetsHtml = presets.map(p => {
+        let isOversTooLow = p.overs < minAllowedOvers;
+        let isWicketsTooLow = p.wickets < minAllowedWickets;
+        let isDisabled = isOversTooLow || isWicketsTooLow;
+        let reason = isOversTooLow 
+            ? `Cannot set to ${p.overs} overs because ${minAllowedOvers} overs have already been played` 
+            : `Cannot set to ${p.wickets} wickets because ${minAllowedWickets} wickets have already fallen`;
+        
+        if (isDisabled) {
+            return `
+                <div class="p-2 bg-slate-100 border border-slate-200 rounded-xl text-left text-xs font-bold text-slate-400 opacity-50 cursor-not-allowed flex items-center justify-between" title="${reason}">
+                    <span class="truncate">${p.label}</span>
+                    <span class="text-[10px] text-slate-400 font-semibold shrink-0 ml-1">N/A</span>
+                </div>
+            `;
+        }
+        return `
+            <button type="button" onclick="setFormatPreset(${p.overs}, ${p.wickets})" class="p-2 bg-white hover:bg-teal-50 border border-slate-200 hover:border-teal-300 rounded-xl text-left text-xs font-bold text-slate-800 transition-all flex items-center justify-between cursor-pointer">
+                <span>${p.label}</span>
+                <span class="text-[10px] text-teal-600 font-semibold">${p.overs}o / ${p.wickets}w</span>
+            </button>
+        `;
+    }).join("");
+
+    let html = `
+        <div class="p-4 bg-gradient-to-r from-teal-700 to-teal-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                    <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Match Format (Overs / Wickets)</div>
+                    <div class="text-[11px] text-teal-100 font-normal">Available during 1st innings • Adjust total match overs & wickets</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl transition-colors">&times;</button>
+        </div>
+        
+        <div class="p-6 bg-slate-50 flex flex-col gap-4">
+            
+            <!-- Quick Presets -->
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Quick Format Presets</label>
+                <div class="grid grid-cols-2 gap-2">
+                    ${presetsHtml}
+                </div>
+            </div>
+
+            <!-- Custom Overs & Wickets Steppers -->
+            <div class="grid grid-cols-2 gap-4">
+                
+                <!-- Max Overs -->
+                <div class="p-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col justify-between">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="text-xs font-bold uppercase tracking-wider text-slate-700">Max Overs</label>
+                        <span class="text-[10px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">Min: ${minAllowedOvers} ov</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="adjustFormatOvers(-5)" class="w-8 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">-5</button>
+                        <button type="button" onclick="adjustFormatOvers(-1)" class="w-8 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">-1</button>
+                        <input id="change-format-overs" type="number" min="${minAllowedOvers}" max="100" value="${defaultOvers}" class="flex-1 border border-slate-300 rounded-xl p-2 text-center font-black text-slate-900 text-lg bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                        <button type="button" onclick="adjustFormatOvers(1)" class="w-8 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">+1</button>
+                        <button type="button" onclick="adjustFormatOvers(5)" class="w-8 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">+5</button>
+                    </div>
+                    <div id="overs-error-msg" class="text-[11px] text-red-600 font-bold mt-1.5 hidden flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>Cannot be less than played overs (${minAllowedOvers} ov).</span>
+                    </div>
+                </div>
+
+                <!-- Max Wickets -->
+                <div class="p-3.5 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col justify-between">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="text-xs font-bold uppercase tracking-wider text-slate-700">Max Wickets</label>
+                        <span class="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">Lost: ${currentWicketsLost} wkt</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="adjustFormatWickets(-1)" class="w-10 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">-1</button>
+                        <input id="change-format-wickets" type="number" min="${minAllowedWickets}" max="10" value="${defaultWickets}" class="flex-1 border border-slate-300 rounded-xl p-2 text-center font-black text-slate-900 text-lg bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                        <button type="button" onclick="adjustFormatWickets(1)" class="w-10 h-10 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer">+1</button>
+                    </div>
+                    <div id="wickets-error-msg" class="text-[11px] text-red-600 font-bold mt-1.5 hidden flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>Cannot be less than wickets lost (${currentWicketsLost} wkt).</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Format Live Summary -->
+            <div id="format-live-summary" class="p-3 bg-teal-50 border border-teal-200/80 rounded-xl text-xs text-teal-950 flex items-start gap-2">
+                <svg class="w-4 h-4 text-teal-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <div id="format-summary-text">
+                    Total match: <strong>${defaultOvers} overs</strong> (${defaultOvers * 6} balls) • Innings concludes at <strong>${defaultWickets} wickets</strong>.
+                </div>
+            </div>
+            
+            <div class="flex justify-between items-center pt-3 border-t border-slate-200 mt-1">
+                <button onclick="showMoreOptionsModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+                    <span>Back</span>
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer">Cancel</button>
+                    <button id="save-format-btn" onclick="submitChangeFormat()" class="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-teal-600/30 transition-all active:scale-98 flex items-center gap-1.5 cursor-pointer">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Save Format</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[520px]");
+
+    let oInp = document.getElementById("change-format-overs");
+    let wInp = document.getElementById("change-format-wickets");
+    let updateSummary = () => {
+        let ov = parseInt(oInp.value) || minAllowedOvers;
+        let wk = parseInt(wInp.value) || 10;
+        let errOvers = document.getElementById("overs-error-msg");
+        let errWkts = document.getElementById("wickets-error-msg");
+        let saveBtn = document.getElementById("save-format-btn");
+        let txt = document.getElementById("format-summary-text");
+        
+        let hasError = false;
+        if (ov < minAllowedOvers) {
+            hasError = true;
+            if (errOvers) errOvers.classList.remove("hidden");
+        } else {
+            if (errOvers) errOvers.classList.add("hidden");
+        }
+
+        if (wk < minAllowedWickets) {
+            hasError = true;
+            if (errWkts) errWkts.classList.remove("hidden");
+        } else {
+            if (errWkts) errWkts.classList.add("hidden");
+        }
+
+        if (saveBtn) {
+            saveBtn.disabled = hasError;
+            if (hasError) {
+                saveBtn.classList.add("opacity-50", "cursor-not-allowed");
+            } else {
+                saveBtn.classList.remove("opacity-50", "cursor-not-allowed");
+            }
+        }
+
+        if (txt) {
+            if (hasError) {
+                txt.innerHTML = `<span class="text-red-700 font-bold">Invalid Format:</span> Maximum overs cannot be less than current played overs (${state.overs_completed || 0}.${state.balls_this_over || 0} ov). Minimum is <strong>${minAllowedOvers} overs</strong>.`;
+            } else {
+                txt.innerHTML = `Total match: <strong>${ov} overs</strong> (${ov * 6} balls) • Innings concludes at <strong>${wk} wickets</strong>.`;
+            }
+        }
+    };
+    if (oInp) oInp.oninput = updateSummary;
+    if (wInp) wInp.oninput = updateSummary;
+};
+
+window.setFormatPreset = function(overs, wickets) {
+    let oInp = document.getElementById("change-format-overs");
+    let wInp = document.getElementById("change-format-wickets");
+    let minO = oInp ? (parseInt(oInp.min) || 1) : 1;
+    if (overs < minO) {
+        alert(`Maximum overs cannot be less than current played overs (${minO} overs).`);
+        return;
+    }
+    if (oInp) oInp.value = overs;
+    if (wInp) wInp.value = wickets;
+    if (oInp && oInp.oninput) oInp.oninput();
+};
+
+window.adjustFormatOvers = function(delta) {
+    let oInp = document.getElementById("change-format-overs");
+    if (!oInp) return;
+    let minO = parseInt(oInp.min) || 1;
+    let cur = parseInt(oInp.value) || minO;
+    oInp.value = Math.max(minO, cur + delta);
+    if (oInp.oninput) oInp.oninput();
+};
+
+window.adjustFormatWickets = function(delta) {
+    let wInp = document.getElementById("change-format-wickets");
+    if (!wInp) return;
+    let minW = parseInt(wInp.min) || 1;
+    let cur = parseInt(wInp.value) || minW;
+    wInp.value = Math.min(10, Math.max(minW, cur + delta));
+    if (wInp.oninput) wInp.oninput();
+};
+
+window.submitChangeFormat = async function() {
+    let state = await eel.get_state()();
+    let currentPlayedOvers = (state.overs_completed || 0) + ((state.balls_this_over || 0) > 0 ? 1 : 0);
+    let minAllowedOvers = Math.max(1, currentPlayedOvers);
+    let currentWicketsLost = state.wickets || 0;
+    let minAllowedWickets = Math.max(1, currentWicketsLost);
+
+    let oversInp = document.getElementById("change-format-overs");
+    let wicketsInp = document.getElementById("change-format-wickets");
+    let overs = parseInt(oversInp.value);
+    let wickets = parseInt(wicketsInp.value);
+
+    if (isNaN(overs) || overs <= 0) {
+        alert("Please enter a valid positive number for overs.");
+        return;
+    }
+    if (overs < minAllowedOvers) {
+        alert(`Maximum overs cannot be less than current played overs (${state.overs_completed || 0}.${state.balls_this_over || 0} overs bowled). Minimum allowed overs is ${minAllowedOvers}.`);
+        return;
+    }
+    if (isNaN(wickets) || wickets <= 0 || wickets > 10) {
+        alert("Please enter a valid wicket count (1-10).");
+        return;
+    }
+    if (wickets < minAllowedWickets) {
+        alert(`Maximum wickets cannot be less than current wickets lost (${currentWicketsLost} wickets fallen). Minimum allowed wickets is ${minAllowedWickets}.`);
+        return;
+    }
+
+    closeModal();
+    await eel.update_match_format(overs, wickets)();
+    refreshUI();
+};
 
 // =========================================================================
 // SIDEBAR NAVIGATION & BADGES
