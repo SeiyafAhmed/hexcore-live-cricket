@@ -19,9 +19,12 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from scoring.views import stream_match_state
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('scoring.urls')),
+    path('stream/', stream_match_state, name='stream_match_state_alias'),
 ]
 
 # Serve media files during development

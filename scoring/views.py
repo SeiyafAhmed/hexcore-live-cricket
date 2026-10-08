@@ -5,22 +5,43 @@ All viewsets use MultiPartParser + FormParser so that image uploads
 are accepted via multipart/form-data alongside JSON payloads.
 """
 
+import json
+import queue
+import threading
+import time
+
 from django.db.models import Avg, Count, Sum
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.http import StreamingHttpResponse
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from .models import Ball, BattingInnings, BowlingInnings, Match, Player, Team
+from .models import (
+    Ball,
+    BattingInnings,
+    BowlingInnings,
+    Group,
+    Match,
+    Player,
+    Team,
+    Tournament,
+)
 from .serializers import (
     BallSerializer,
     BattingInningsSerializer,
     BowlingInningsSerializer,
+    GroupSerializer,
     MatchSerializer,
     PlayerSerializer,
     PlayerStatsSerializer,
     TeamSerializer,
+    TournamentSerializer,
 )
+from .services import calculate_group_standings, calculate_tournament_leaderboards
 
 
 # ---------------------------------------------------------------------------
@@ -144,17 +165,80 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
 
 # ---------------------------------------------------------------------------
+# Tournament & Group
+# ---------------------------------------------------------------------------
+
+class TournamentViewSet(viewsets.ModelViewSet):
+    """CRUD for tournaments."""
+
+    queryset = Tournament.objects.prefetch_related("groups__teams").all()
+    serializer_class = TournamentSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    lookup_field = "id"
+
+    @action(detail=True, methods=["get"], url_path="leaderboards")
+    def leaderboards(self, request, id=None):
+        """
+        GET /api/tournaments/<id>/leaderboards/
+        Returns comprehensive tournament stats and awards.
+        """
+        tournament = self.get_object()
+        leaderboards_data = calculate_tournament_leaderboards(tournament.id)
+        return Response(leaderboards_data)
+
+
+class GroupViewSet(viewsets.ModelViewSet):
+    """CRUD for tournament groups + points table standings endpoint."""
+
+    queryset = Group.objects.select_related("tournament").prefetch_related("teams").all()
+    serializer_class = GroupSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    lookup_field = "id"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tournament_id = self.request.query_params.get("tournament")
+        if tournament_id:
+            qs = qs.filter(tournament_id=tournament_id)
+        return qs
+
+    @action(detail=True, methods=["get"], url_path="standings")
+    def standings(self, request, id=None):
+        """
+        GET /api/groups/<id>/standings/
+        Calls calculate_group_standings and returns the ordered points table array.
+        """
+        group = self.get_object()
+        standings_data = calculate_group_standings(group.id)
+        return Response(standings_data)
+
+    @action(detail=True, methods=["post"], url_path="assign-teams")
+    def assign_teams(self, request, id=None):
+        """
+        POST /api/groups/<id>/assign-teams/
+        Payload: {"team_ids": ["uuid1", "uuid2", ...]}
+        """
+        group = self.get_object()
+        team_ids = request.data.get("team_ids", [])
+        group.teams.set(team_ids)
+        serializer = self.get_serializer(group)
+        return Response(serializer.data)
+
+
+# ---------------------------------------------------------------------------
 # Match
 # ---------------------------------------------------------------------------
 
 class MatchViewSet(viewsets.ModelViewSet):
     """CRUD for matches."""
 
-    queryset = Match.objects.select_related("batting_team", "bowling_team")
+    queryset = Match.objects.select_related(
+        "tournament", "group", "batting_team", "bowling_team", "winner"
+    )
     serializer_class = MatchSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     lookup_field = "id"
-    filterset_fields = ["status", "batting_team", "bowling_team"]
+    filterset_fields = ["status", "batting_team", "bowling_team", "tournament", "group"]
 
 
 # ---------------------------------------------------------------------------
@@ -190,3 +274,185 @@ class BallViewSet(viewsets.ModelViewSet):
     serializer_class = BallSerializer
     lookup_field = "id"
     filterset_fields = ["match", "innings", "over", "batsman", "bowler"]
+
+
+# ---------------------------------------------------------------------------
+# Server-Sent Events (SSE) Real-Time Data Pipeline
+# ---------------------------------------------------------------------------
+
+class MatchEventHub:
+    """Thread-safe pub/sub hub to broadcast match state updates to SSE clients."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._subscribers = set()
+
+    def subscribe(self):
+        q = queue.Queue(maxsize=100)
+        with self._lock:
+            self._subscribers.add(q)
+        return q
+
+    def unsubscribe(self, q):
+        with self._lock:
+            self._subscribers.discard(q)
+
+    def notify(self, data=None):
+        with self._lock:
+            for q in list(self._subscribers):
+                try:
+                    q.put_nowait(data)
+                except queue.Full:
+                    pass
+
+match_event_hub = MatchEventHub()
+
+
+@receiver(post_save, sender=Match)
+def on_match_saved(sender, instance, **kwargs):
+    """Notify all SSE clients whenever a Match record is updated in the database."""
+    if instance.current_innings_state:
+        match_event_hub.notify(instance.current_innings_state)
+    else:
+        match_event_hub.notify({})
+
+
+@receiver(post_save, sender=Ball)
+def on_ball_saved(sender, instance, **kwargs):
+    """Notify all SSE clients whenever a Ball record is logged."""
+    if instance.match and instance.match.current_innings_state:
+        match_event_hub.notify(instance.match.current_innings_state)
+
+
+def get_current_match_state(match_id=None):
+    """Retrieve the latest or requested match state from the database."""
+    try:
+        if match_id:
+            m = Match.objects.filter(id=match_id).first()
+        else:
+            m = Match.objects.filter(status=Match.Status.LIVE).order_by("-updated_at").first()
+            if not m:
+                m = Match.objects.order_by("-updated_at").first()
+        if m and m.current_innings_state:
+            return m.current_innings_state
+    except Exception as e:
+        print("[get_current_match_state] Error:", e)
+    return None
+
+
+def stream_match_state(request):
+    """
+    StreamingHttpResponse endpoint for Server-Sent Events (SSE).
+    GET /api/stream/
+    Yields the JSON match state whenever the database is updated.
+    """
+    match_id = request.GET.get("match_id")
+
+    def event_stream():
+        q = match_event_hub.subscribe()
+        last_sent_json = None
+        last_ping = time.time()
+
+        try:
+            # 1. Immediately yield the current database state upon connection
+            initial_state = get_current_match_state(match_id)
+            if initial_state:
+                raw_json = json.dumps(initial_state)
+                last_sent_json = raw_json
+                yield f"data: {raw_json}\n\n"
+
+            while True:
+                state_to_send = None
+                try:
+                    # Wait for in-process DB update signal (timeout 0.25s)
+                    notified_data = q.get(timeout=0.25)
+                    state_to_send = notified_data if (notified_data and not match_id) else get_current_match_state(match_id)
+                except queue.Empty:
+                    # Timeout: Check database to detect direct/external SQLite updates
+                    state_to_send = get_current_match_state(match_id)
+
+                if state_to_send is not None:
+                    raw_json = json.dumps(state_to_send)
+                    if raw_json != last_sent_json:
+                        last_sent_json = raw_json
+                        yield f"data: {raw_json}\n\n"
+
+                # Keep-alive heartbeat every 15s to keep the SSE connection alive
+                now = time.time()
+                if now - last_ping >= 15:
+                    last_ping = now
+                    yield ": keep-alive\n\n"
+
+        except GeneratorExit:
+            pass
+        finally:
+            match_event_hub.unsubscribe(q)
+
+    response = StreamingHttpResponse(
+        event_stream(),
+        content_type="text/event-stream"
+    )
+    response["Cache-Control"] = "no-cache, no-transform"
+    response["X-Accel-Buffering"] = "no"
+    response["Access-Control-Allow-Origin"] = "*"
+    response["Access-Control-Allow-Headers"] = "*"
+    return response
+
+
+@api_view(["POST", "GET"])
+@permission_classes([AllowAny])
+def match_state_api(request):
+    """
+    GET: Retrieve the current match state from database.
+    POST: Update or create the match state in database (triggers SSE stream via post_save signal).
+    """
+    if request.method == "GET":
+        match_id = request.GET.get("match_id")
+        state = get_current_match_state(match_id)
+        return Response(state or {})
+
+    state_payload = request.data
+    if not isinstance(state_payload, dict):
+        return Response({"error": "Payload must be a JSON object"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Find active match or create one
+    match = Match.objects.filter(status=Match.Status.LIVE).order_by("-updated_at").first()
+    if not match:
+        match = Match.objects.order_by("-updated_at").first()
+
+    if not match:
+        bat_team_id = state_payload.get("batting_team_id")
+        bowl_team_id = state_payload.get("bowling_team_id")
+        bat_team = Team.objects.filter(id=bat_team_id).first() if bat_team_id else Team.objects.first()
+        bowl_team = Team.objects.filter(id=bowl_team_id).first() if bowl_team_id else Team.objects.last()
+
+        if not bat_team:
+            bat_team = Team.objects.create(name=state_payload.get("team_1_name") or "Team 1", theme_color="#ff007f")
+        if not bowl_team or bowl_team.id == bat_team.id:
+            bowl_team = Team.objects.create(name=state_payload.get("team_2_name") or "Team 2", theme_color="#dc2626")
+
+        match = Match.objects.create(
+            batting_team=bat_team,
+            bowling_team=bowl_team,
+            status=Match.Status.LIVE,
+            current_innings_state=state_payload,
+            tournament_id=state_payload.get("tournament_id"),
+            group_id=state_payload.get("group_id"),
+        )
+    else:
+        match.current_innings_state = state_payload
+        if state_payload.get("tournament_id"):
+            match.tournament_id = state_payload.get("tournament_id")
+        if state_payload.get("group_id"):
+            match.group_id = state_payload.get("group_id")
+        if state_payload.get("winner_id"):
+            match.winner_id = state_payload.get("winner_id")
+        if state_payload.get("result_status"):
+            match.result_status = state_payload.get("result_status")
+        if state_payload.get("match_over"):
+            match.status = Match.Status.COMPLETED
+        else:
+            match.status = Match.Status.LIVE
+        match.save()
+
+    return Response({"status": "success", "match_id": str(match.id)})

@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local match session persistence
+desktop_app/active_match.json
+desktop_app/active_match.json.tmp

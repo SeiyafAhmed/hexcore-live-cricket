@@ -86,6 +86,49 @@
         .animate-pulse-glow {
             animation: pulseGlow 2s infinite ease-in-out;
         }
+
+        /* Speed Scale Slider & Scalable Thumb Button */
+        .speed-scale-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 12px;
+            background: linear-gradient(90deg, #0ea5e9 0%, #10b981 35%, #f59e0b 68%, #ef4444 100%);
+            border-radius: 9999px;
+            outline: none;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+        .speed-scale-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, #ffffff, #e2e8f0);
+            border: 3px solid #0f172a;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.5), 0 0 0 3px rgba(245, 158, 11, 0.5);
+            cursor: grab;
+            transition: transform 0.12s ease, box-shadow 0.12s ease;
+        }
+        .speed-scale-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.6), 0 0 0 4px rgba(245, 158, 11, 0.7);
+        }
+        .speed-scale-slider::-webkit-slider-thumb:active {
+            cursor: grabbing;
+            transform: scale(1.22);
+            box-shadow: 0 8px 22px rgba(0,0,0,0.7), 0 0 0 5px rgba(239, 68, 68, 0.7);
+        }
+        .speed-scale-slider::-moz-range-thumb {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid #0f172a;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+            cursor: grab;
+        }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 flex h-screen overflow-hidden antialiased select-none">
@@ -171,6 +214,34 @@
                 </div>
                 <span id="badge-players-count" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">0</span>
             </button>
+
+            <!-- Tab 4: Tournaments -->
+            <button id="nav-tab-tournaments" onclick="switchSidebarTab('tournaments')" class="w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800/40 group">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-slate-400 group-hover:text-emerald-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+                        <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+                        <path d="M4 22h16"/>
+                        <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+                        <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+                        <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+                    </svg>
+                    <span class="font-semibold">Tournaments</span>
+                </div>
+                <span id="badge-tournaments-count" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">0</span>
+            </button>
+
+            <!-- Tab 5: Tournament Stats -->
+            <button id="nav-tab-stats" onclick="switchSidebarTab('stats')" class="w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800/40 group">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-slate-400 group-hover:text-emerald-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="20" x2="18" y2="10"/>
+                        <line x1="12" y1="20" x2="12" y2="4"/>
+                        <line x1="6" y1="20" x2="6" y2="14"/>
+                    </svg>
+                    <span class="font-semibold">Awards & Stats</span>
+                </div>
+            </button>
         </nav>
 
         <!-- Sidebar Footer -->
@@ -198,7 +269,7 @@
         <div id="view-scoreboard" class="app-tab-view flex-1 flex flex-col">
             
             <!-- Setup Screen -->
-            <div id="setup-screen" class="p-8 max-w-4xl mx-auto w-full animate-fade-in">
+            <div id="setup-screen" class="hidden p-8 max-w-4xl mx-auto w-full animate-fade-in">
                 <div class="bg-white rounded-2xl shadow-xl border border-slate-200/80 p-8">
                     <div class="flex items-center justify-between pb-6 border-b border-slate-100">
                         <div>
@@ -210,7 +281,34 @@
                         </div>
                     </div>
                     
+                    <!-- Active Match In Progress Banner -->
+                    <div id="setup-resume-banner" class="hidden mt-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="text-2xl">🏏</span>
+                            <div>
+                                <div class="text-sm font-bold text-emerald-900" id="resume-banner-title">Active Match in Progress</div>
+                                <div class="text-xs text-emerald-700" id="resume-banner-subtitle">You have an ongoing match. You can resume scoring or discard it.</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="resumeActiveMatch()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase px-4 py-2.5 rounded-xl shadow transition-all active:scale-95 cursor-pointer">Resume Match</button>
+                            <button type="button" onclick="confirmResetCurrentMatch()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase px-3 py-2.5 rounded-xl transition-all cursor-pointer">Discard</button>
+                        </div>
+                    </div>
+                    
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-6">
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Tournament (Optional)</label>
+                            <select id="setup-tournament" onchange="onSetupTournamentChange()" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all">
+                                <option value="">-- Standalone Match --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Tournament Group (Optional)</label>
+                            <select id="setup-group" onchange="onSetupGroupChange()" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all">
+                                <option value="">-- No Group / Standalone --</option>
+                            </select>
+                        </div>
                         <div>
                             <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Batting Team</label>
                             <select id="setup-batting-team" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
@@ -252,7 +350,7 @@
             </div>
 
             <!-- Scoring Screen -->
-            <div id="scoring-screen" class="hidden p-6 max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-[450px_1fr] gap-6 animate-fade-in">
+            <div id="scoring-screen" class="hidden p-6 max-w-full 2xl:max-w-[1780px] mx-auto w-full grid grid-cols-1 xl:grid-cols-[430px_1fr_320px] gap-6 animate-fade-in">
                 <!-- LEFT COLUMN: Admin Control -->
                 <div class="border-r border-slate-200 pr-6 flex flex-col gap-4">
                     
@@ -431,6 +529,136 @@
                     </div>
                     
                 </div>
+
+                <!-- RIGHT COLUMN: Scoring Tools & Speed Gun Panel -->
+                <div id="admin-right-panel" class="sticky top-6 self-start flex flex-col gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200/80 transition-all select-none max-h-[calc(100vh-3rem)] overflow-y-auto">
+
+                    <!-- SPEED INDICATOR & SCALABLE BUTTON CARD -->
+                    <div class="bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-2xl p-4 shadow-xl border border-slate-800 flex flex-col gap-3.5">
+                        
+                        <!-- Speed Display Header -->
+                        <div class="flex items-center justify-between">
+                            <span class="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-amber-400">
+                                <span class="animate-pulse">⚡</span>
+                                <span>Speed Gun Radar</span>
+                            </span>
+                            <span id="scale-overlay-status" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                Overlay Synced
+                            </span>
+                        </div>
+
+                        <!-- Giant Speed Value Readout -->
+                        <div class="bg-slate-950/80 rounded-xl p-3 border border-slate-800/80 flex items-center justify-between">
+                            <div class="flex items-baseline gap-1.5">
+                                <span id="scale-speed-display" class="heading-font text-4xl font-black text-amber-300 tracking-tight">142.5</span>
+                                <span class="text-xs font-black text-slate-400">KM/H</span>
+                            </div>
+                            <div class="flex flex-col items-end gap-1">
+                                <span id="scale-pace-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                                    Fast Pace ⚡
+                                </span>
+                                <span class="text-[10px] text-slate-400 font-mono" id="scale-mph-display">88.5 mph</span>
+                            </div>
+                        </div>
+
+                        <!-- Scalable Button / Scale Slider Control -->
+                        <div class="flex flex-col gap-2 pt-1">
+                            <div class="flex items-center justify-between text-xs text-slate-400 font-bold">
+                                <span>Speed Scale Slider</span>
+                                <div class="flex items-center gap-1">
+                                    <button onclick="stepSpeed(-1)" title="-1 km/h" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-bold text-xs active:scale-95 transition-all">
+                                        -1
+                                    </button>
+                                    <button onclick="stepSpeed(-0.5)" title="-0.5 km/h" class="px-1.5 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold active:scale-95 transition-all">
+                                        -0.5
+                                    </button>
+                                    <button onclick="stepSpeed(0.5)" title="+0.5 km/h" class="px-1.5 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold active:scale-95 transition-all">
+                                        +0.5
+                                    </button>
+                                    <button onclick="stepSpeed(1)" title="+1 km/h" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-bold text-xs active:scale-95 transition-all">
+                                        +1
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- The Scalable Range Slider Track & Thumb Button -->
+                            <div class="relative py-2 px-1">
+                                <input id="scale-slider" 
+                                       type="range" 
+                                       min="60" 
+                                       max="165" 
+                                       step="0.5" 
+                                       value="142.5" 
+                                       oninput="onScaleSliderInput(this.value)" 
+                                       onchange="onScaleSliderChange(this.value)" 
+                                       class="speed-scale-slider" />
+                                
+                                <!-- Scale Graduation Ticks -->
+                                <div class="flex justify-between text-[9px] font-mono font-bold text-slate-400 mt-2 px-0.5 select-none">
+                                    <span>60</span>
+                                    <span>80</span>
+                                    <span>100</span>
+                                    <span>120</span>
+                                    <span class="text-amber-400 font-black">140</span>
+                                    <span class="text-rose-400 font-black">165</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Primary Action Buttons -->
+                        <div class="flex items-center gap-2 pt-1">
+                            <button onclick="sendScaleSpeed()" class="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-2.5 px-3 rounded-xl shadow-lg shadow-amber-500/25 active:scale-98 transition-all flex items-center justify-center gap-1.5 text-xs">
+                                <span>⚡ Send to Overlay</span>
+                            </button>
+                            <button onclick="clearScaleSpeed()" title="Clear ball speed from screen overlay" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-3 py-2.5 rounded-xl text-xs active:scale-95 transition-all">
+                                ✕
+                            </button>
+                        </div>
+
+                        <!-- Quick Pace Category Presets -->
+                        <div class="pt-2 border-t border-slate-800/80 flex flex-col gap-1.5">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pace Presets:</span>
+                            <div class="grid grid-cols-5 gap-1 text-center">
+                                <button onclick="setScalePreset(88)" class="py-1 px-1 rounded-lg bg-slate-800 hover:bg-sky-500/20 hover:text-sky-300 text-slate-300 text-[11px] font-mono font-bold transition-all">
+                                    88
+                                </button>
+                                <button onclick="setScalePreset(118)" class="py-1 px-1 rounded-lg bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-300 text-slate-300 text-[11px] font-mono font-bold transition-all">
+                                    118
+                                </button>
+                                <button onclick="setScalePreset(136)" class="py-1 px-1 rounded-lg bg-slate-800 hover:bg-amber-500/20 hover:text-amber-300 text-slate-300 text-[11px] font-mono font-bold transition-all">
+                                    136
+                                </button>
+                                <button onclick="setScalePreset(144)" class="py-1 px-1 rounded-lg bg-slate-800 hover:bg-orange-500/20 hover:text-orange-300 text-slate-300 text-[11px] font-mono font-bold transition-all">
+                                    144
+                                </button>
+                                <button onclick="setScalePreset(152)" class="py-1 px-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 text-[11px] font-mono font-bold transition-all">
+                                    152
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Live Auto-Sync Toggle -->
+                        <div class="flex items-center justify-between pt-1 text-[11px] text-slate-400">
+                            <label class="flex items-center gap-2 cursor-pointer select-none">
+                                <input id="auto-sync-speed-toggle" type="checkbox" checked class="w-3.5 h-3.5 rounded text-amber-500 bg-slate-800 border-slate-700 focus:ring-0 cursor-pointer" />
+                                <span class="font-medium">Auto-send to overlay on slide</span>
+                            </label>
+                        </div>
+
+                    </div>
+
+                    <!-- Future Extensions Notice Card -->
+                    <div class="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 text-xs text-slate-500 flex flex-col gap-1.5">
+                        <div class="flex items-center gap-1.5 font-bold text-slate-700">
+                            <svg class="w-3.5 h-3.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                            <span>Scoring Section Panel</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 leading-relaxed">
+                            Tell me what else you'd like in this scoring panel whenever you're ready!
+                        </p>
+                    </div>
+
+                </div>
             </div>
 
         </div>
@@ -516,6 +744,307 @@
                 <!-- Players Table Container -->
                 <div id="players-list-container" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <!-- Table rendered dynamically by main.js -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- TAB 4: TOURNAMENTS & GROUP STANDINGS VIEW                         -->
+        <!-- ================================================================= -->
+        <div id="view-tournaments" class="app-tab-view flex-1 hidden p-8 animate-fade-in">
+            <div class="max-w-7xl mx-auto flex flex-col gap-6">
+                <!-- Header -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+                    <div>
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-2xl">🏆</span>
+                            <h1 class="heading-font text-3xl font-extrabold text-slate-900">Tournament Management & Standings</h1>
+                        </div>
+                        <p class="text-sm text-slate-500 mt-1">Organize tournament leagues, configure group stages, assign squads, and track real-time Net Run Rate (NRR) points tables.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button onclick="openCreateGroupModal()" class="bg-white hover:bg-slate-50 text-slate-700 font-bold px-4 py-2.5 rounded-xl border border-slate-300 shadow-sm active:scale-98 transition-all flex items-center gap-2 text-sm whitespace-nowrap">
+                            <svg class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                            <span>Add Group</span>
+                        </button>
+                        <button onclick="openCreateTournamentModal()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-98 transition-all flex items-center gap-2 text-sm whitespace-nowrap">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                            <span>Create Tournament</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Empty State: No Tournaments -->
+                <div id="tournaments-empty-state" class="hidden bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm">
+                    <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-3xl">🏆</div>
+                    <h3 class="heading-font text-xl font-bold text-slate-800">No Tournaments Created Yet</h3>
+                    <p class="text-sm text-slate-500 max-w-md mx-auto mt-1 mb-6">Create your first championship tournament to organize group pools, assign competing clubs, and calculate automated standings.</p>
+                    <button onclick="openCreateTournamentModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-xl text-sm shadow-md transition-all">
+                        + Create First Tournament
+                    </button>
+                </div>
+
+                <!-- Main Content: Tournament Selected Container -->
+                <div id="tournaments-main-content" class="flex flex-col gap-6">
+                    <!-- Tournament Control Bar -->
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                        <div class="flex items-center gap-4 flex-wrap flex-1">
+                            <div class="min-w-[260px]">
+                                <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Select Tournament</label>
+                                <select id="tournament-select" onchange="onTournamentSelected(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white shadow-sm transition-all"></select>
+                            </div>
+
+                            <!-- Meta Badges -->
+                            <div class="flex items-center gap-2 pt-3 sm:pt-4 flex-wrap">
+                                <span id="tournament-meta-season" class="px-3 py-1 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1.5">
+                                    <span>📅</span> <span id="tournament-meta-season-val">Season 2026</span>
+                                </span>
+                                <span id="tournament-meta-overs" class="px-3 py-1 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-1.5">
+                                    <span>🏏</span> <span id="tournament-meta-overs-val">20 Overs Quota</span>
+                                </span>
+                                <span id="tournament-meta-groups" class="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                                    <span>📂</span> <span id="tournament-meta-groups-val">0 Groups</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Tournament Action Buttons -->
+                        <div class="flex items-center gap-2 pt-2 sm:pt-4">
+                            <button onclick="openEditTournamentModal()" title="Edit Tournament Details" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                                <span>Edit</span>
+                            </button>
+                            <button onclick="confirmDeleteTournament()" title="Delete Tournament" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                <span>Delete</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Groups Navigation Pills Bar -->
+                    <div class="flex flex-col gap-3">
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                                <span>Tournament Pools / Groups</span>
+                                <span id="groups-count-badge" class="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[10px]">0</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="openCreateGroupModal()" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                    <span>New Group</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Group Tabs Container -->
+                        <div id="group-tabs-list" class="flex items-center gap-2 overflow-x-auto pb-1">
+                            <!-- Populated dynamically by main.js -->
+                        </div>
+                    </div>
+
+                    <!-- Selected Group Active Content -->
+                    <div id="group-active-container" class="flex flex-col gap-5">
+                        <!-- Group Header & Teams Toolbar -->
+                        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <div class="flex items-center gap-3">
+                                    <h2 id="active-group-name" class="heading-font text-2xl font-black text-slate-900">Group A</h2>
+                                    <span id="active-group-teams-count" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">0 Teams Assigned</span>
+                                </div>
+                                <!-- Group Team Chips -->
+                                <div id="active-group-teams-chips" class="flex flex-wrap items-center gap-2 mt-2">
+                                    <!-- Populated dynamically by main.js -->
+                                </div>
+                            </div>
+
+                            <!-- Group Actions -->
+                            <div class="flex items-center gap-2 shrink-0">
+                                <button onclick="openAssignTeamsModal()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-md shadow-emerald-600/20 active:scale-98 transition-all flex items-center gap-1.5">
+                                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                                    <span>Assign Teams</span>
+                                </button>
+                                <button onclick="openRenameGroupModal()" title="Rename Group" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-colors">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                                </button>
+                                <button onclick="confirmDeleteGroup()" title="Delete Group" class="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-colors">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- POINTS TABLE CARD -->
+                        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-base font-bold text-slate-800 heading-font">Official Points Table</span>
+                                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">ICC NRR System</span>
+                                </div>
+                                <div class="flex items-center gap-3 text-xs text-slate-500">
+                                    <span class="flex items-center gap-1 font-medium"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Win = 2 Pts</span>
+                                    <span class="flex items-center gap-1 font-medium"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Tie / NR = 1 Pt</span>
+                                </div>
+                            </div>
+
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 select-none">
+                                            <th class="py-3.5 px-4 w-16 text-center">Rank</th>
+                                            <th class="py-3.5 px-4">Team</th>
+                                            <th class="py-3.5 px-3 text-center" title="Played">P</th>
+                                            <th class="py-3.5 px-3 text-center text-emerald-700" title="Won">W</th>
+                                            <th class="py-3.5 px-3 text-center text-rose-600" title="Lost">L</th>
+                                            <th class="py-3.5 px-3 text-center" title="No Result">NR</th>
+                                            <th class="py-3.5 px-4 text-center font-extrabold text-slate-900 bg-slate-100/60" title="Total Points">Pts</th>
+                                            <th class="py-3.5 px-4 text-center font-extrabold text-slate-800" title="Net Run Rate = (Runs Scored / Overs Faced) - (Runs Conceded / Overs Bowled)">NRR</th>
+                                            <th class="py-3.5 px-4 text-right text-slate-400 font-mono text-[10px] hidden md:table-cell">Runs / Overs (Scored vs Conceded)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="points-table-tbody" class="divide-y divide-slate-100">
+                                        <!-- Dynamically generated rows -->
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Standings Footer / Notes -->
+                            <div class="px-6 py-3 bg-slate-50 border-t border-slate-200/80 text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="font-bold text-slate-700">Sorting Order:</span>
+                                    <span>Points DESC → Wins DESC → NRR DESC.</span>
+                                </div>
+                                <div>
+                                    <span class="font-bold text-slate-700">All-Out Rule Active:</span> If bowled out, overs faced is computed as the full match overs quota.
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+        </div>
+
+        <!-- TAB 5: TOURNAMENT STATS & AWARDS VIEW                             -->
+        <!-- ================================================================= -->
+        <div id="view-stats" class="app-tab-view flex-1 hidden p-8 animate-fade-in">
+            <div class="max-w-7xl mx-auto flex flex-col gap-6">
+                <!-- Header -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+                    <div>
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-2xl">⭐</span>
+                            <h1 class="heading-font text-3xl font-extrabold text-slate-900">Tournament Stats & Awards</h1>
+                        </div>
+                        <p class="text-sm text-slate-500 mt-1">Comprehensive leaderboards for batting, bowling, fielding, and MVP rankings.</p>
+                    </div>
+                </div>
+
+                <!-- Control Bar -->
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                    <div class="min-w-[260px]">
+                        <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Select Tournament</label>
+                        <select id="stats-tournament-select" onchange="onStatsTournamentSelected(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white shadow-sm transition-all"></select>
+                    </div>
+                    <button onclick="refreshLeaderboards()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl border border-slate-300 shadow-sm active:scale-98 transition-all flex items-center gap-2 text-sm">
+                        <svg class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.63-6.37L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.63 6.37L22 14"/></svg>
+                        <span>Refresh Stats</span>
+                    </button>
+                </div>
+
+                <!-- Stats Grid -->
+                <div id="stats-content-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    
+                    <!-- MVP Board -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col xl:col-span-3">
+                        <div class="px-5 py-3 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 flex items-center justify-between">
+                            <span class="font-black heading-font flex items-center gap-2">🏆 Most Valuable Player (MVP) Rankings</span>
+                        </div>
+                        <div class="p-0 overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-slate-50 border-b border-slate-100 text-[10px] uppercase font-bold text-slate-500">
+                                    <tr>
+                                        <th class="py-2 px-4 text-center w-12">Rank</th>
+                                        <th class="py-2 px-4">Player</th>
+                                        <th class="py-2 px-4">Team</th>
+                                        <th class="py-2 px-4 text-right">Impact Points</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stats-mvp" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Orange Cap (Most Runs) -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div class="px-5 py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white flex items-center justify-between">
+                            <span class="font-bold heading-font flex items-center gap-2">🏏 Orange Cap (Most Runs)</span>
+                        </div>
+                        <div class="p-0">
+                            <table class="w-full text-sm text-left">
+                                <tbody id="stats-top-scorers" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Purple Cap (Most Wickets) -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div class="px-5 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white flex items-center justify-between">
+                            <span class="font-bold heading-font flex items-center gap-2">🎯 Purple Cap (Most Wickets)</span>
+                        </div>
+                        <div class="p-0">
+                            <table class="w-full text-sm text-left">
+                                <tbody id="stats-top-wickets" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Highest Score -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div class="px-5 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white flex items-center justify-between">
+                            <span class="font-bold heading-font flex items-center gap-2">💥 Highest Individual Score</span>
+                        </div>
+                        <div class="p-0">
+                            <table class="w-full text-sm text-left">
+                                <tbody id="stats-highest-score" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Most 6s -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div class="px-5 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white flex items-center justify-between">
+                            <span class="font-bold heading-font flex items-center gap-2">🚀 Maximum Sixes</span>
+                        </div>
+                        <div class="p-0">
+                            <table class="w-full text-sm text-left">
+                                <tbody id="stats-most-6s" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Most 4s -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div class="px-5 py-3 bg-gradient-to-r from-cyan-500 to-cyan-600 text-white flex items-center justify-between">
+                            <span class="font-bold heading-font flex items-center gap-2">💨 Maximum Fours</span>
+                        </div>
+                        <div class="p-0">
+                            <table class="w-full text-sm text-left">
+                                <tbody id="stats-most-4s" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Best Bowling Figures -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                        <div class="px-5 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white flex items-center justify-between">
+                            <span class="font-bold heading-font flex items-center gap-2">🌪️ Best Bowling Figures</span>
+                        </div>
+                        <div class="p-0">
+                            <table class="w-full text-sm text-left">
+                                <tbody id="stats-best-figures" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </div>

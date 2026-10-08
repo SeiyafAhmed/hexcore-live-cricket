@@ -9,6 +9,208 @@ window.onerror = function(msg, url, line, col, error) {
     return false;
 };
 
+// =========================================================================
+// TOURNAMENT & GROUP API CLIENT (HYBRID: EEL + DIRECT DJANGO REST FALLBACK)
+// =========================================================================
+const TOURNAMENT_API_BASE = "http://127.0.0.1:8000/api";
+
+const TournamentAPI = {
+    async getTournaments() {
+        if (window.eel && typeof eel.get_tournaments === 'function') {
+            try {
+                let res = await eel.get_tournaments()();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel get_tournaments failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/tournaments/`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return await res.json();
+    },
+
+    async createTournament(name, season = "", maxOvers = 20) {
+        if (window.eel && typeof eel.create_tournament === 'function') {
+            try {
+                let res = await eel.create_tournament(name, season, maxOvers)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel create_tournament failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/tournaments/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: name, season: season || "", max_overs: parseInt(maxOvers) || 20 })
+        });
+        if (!res.ok) {
+            let errText = await res.text().catch(() => "");
+            throw new Error(`Failed to create tournament (${res.status}): ${errText || res.statusText}`);
+        }
+        return await res.json();
+    },
+
+    async updateTournament(tournamentId, name, season = "", maxOvers = 20) {
+        if (window.eel && typeof eel.update_tournament === 'function') {
+            try {
+                let res = await eel.update_tournament(tournamentId, name, season, maxOvers)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel update_tournament failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/tournaments/${tournamentId}/`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: name, season: season || "", max_overs: parseInt(maxOvers) || 20 })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return await res.json();
+    },
+
+    async deleteTournament(tournamentId) {
+        if (window.eel && typeof eel.delete_tournament === 'function') {
+            try {
+                let res = await eel.delete_tournament(tournamentId)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel delete_tournament failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/tournaments/${tournamentId}/`, {
+            method: "DELETE"
+        });
+        if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return { success: true };
+    },
+
+    async getGroups(tournamentId = null) {
+        if (window.eel && typeof eel.get_groups === 'function') {
+            try {
+                let res = await eel.get_groups(tournamentId)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel get_groups failed, using REST fallback:", e);
+            }
+        }
+        let url = tournamentId ? `${TOURNAMENT_API_BASE}/groups/?tournament=${tournamentId}` : `${TOURNAMENT_API_BASE}/groups/`;
+        let res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return await res.json();
+    },
+
+    async createGroup(tournamentId, name, teamIds = []) {
+        if (window.eel && typeof eel.create_group === 'function') {
+            try {
+                let res = await eel.create_group(tournamentId, name, teamIds)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel create_group failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/groups/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tournament: tournamentId, name: name, teams: teamIds || [] })
+        });
+        if (!res.ok) {
+            let errText = await res.text().catch(() => "");
+            throw new Error(`Failed to create group (${res.status}): ${errText || res.statusText}`);
+        }
+        return await res.json();
+    },
+
+    async updateGroup(groupId, name) {
+        if (window.eel && typeof eel.update_group === 'function') {
+            try {
+                let res = await eel.update_group(groupId, name)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel update_group failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/groups/${groupId}/`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: name })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return await res.json();
+    },
+
+    async deleteGroup(groupId) {
+        if (window.eel && typeof eel.delete_group === 'function') {
+            try {
+                let res = await eel.delete_group(groupId)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel delete_group failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/groups/${groupId}/`, {
+            method: "DELETE"
+        });
+        if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return { success: true };
+    },
+
+    async assignTeamsToGroup(groupId, teamIds) {
+        if (window.eel && typeof eel.assign_teams_to_group === 'function') {
+            try {
+                let res = await eel.assign_teams_to_group(groupId, teamIds)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel assign_teams_to_group failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/groups/${groupId}/assign-teams/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ team_ids: teamIds || [] })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return await res.json();
+    },
+
+    async getGroupStandings(groupId) {
+        if (window.eel && typeof eel.get_group_standings === 'function') {
+            try {
+                let res = await eel.get_group_standings(groupId)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel get_group_standings failed, using REST fallback:", e);
+            }
+        }
+        let res = await fetch(`${TOURNAMENT_API_BASE}/groups/${groupId}/standings/`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return await res.json();
+    }
+};
+
+// Polyfill window.eel so eel.<method>()() syntax NEVER throws "is not a function"
+(function polyfillEelTournamentMethods() {
+    if (!window.eel) window.eel = {};
+    const methods = {
+        get_tournaments: () => () => TournamentAPI.getTournaments(),
+        create_tournament: (n, s, o) => () => TournamentAPI.createTournament(n, s, o),
+        update_tournament: (id, n, s, o) => () => TournamentAPI.updateTournament(id, n, s, o),
+        delete_tournament: (id) => () => TournamentAPI.deleteTournament(id),
+        get_groups: (tId) => () => TournamentAPI.getGroups(tId),
+        create_group: (tId, n, teams) => () => TournamentAPI.createGroup(tId, n, teams),
+        update_group: (gId, n) => () => TournamentAPI.updateGroup(gId, n),
+        delete_group: (gId) => () => TournamentAPI.deleteGroup(gId),
+        assign_teams_to_group: (gId, teams) => () => TournamentAPI.assignTeamsToGroup(gId, teams),
+        get_group_standings: (gId) => () => TournamentAPI.getGroupStandings(gId)
+    };
+
+    for (const [key, fn] of Object.entries(methods)) {
+        if (typeof window.eel[key] !== 'function') {
+            window.eel[key] = fn;
+        }
+    }
+})();
+
+
 async function initSetup() {
     try {
         if(window.eel && eel.console_log) eel.console_log("Starting initSetup")();
@@ -70,6 +272,24 @@ async function initSetup() {
             } catch(e) { if(window.eel && eel.console_log) eel.console_log("Error loading bowling players: " + e); }
         };
         
+        let tournSelect = document.getElementById("setup-tournament");
+        if (tournSelect) {
+            try {
+                let tourns = await TournamentAPI.getTournaments();
+                let curVal = tournSelect.value;
+                tournSelect.innerHTML = `<option value="">-- Standalone Match --</option>`;
+                (tourns || []).forEach(t => {
+                    let opt = document.createElement("option");
+                    opt.value = t.id;
+                    opt.text = `${t.name} (${t.season || 'T20'})`;
+                    tournSelect.add(opt);
+                });
+                if (curVal) tournSelect.value = curVal;
+            } catch(e) {
+                console.error("Error populating tournaments in setup:", e);
+            }
+        }
+
         if(teams.length > 0) {
             battingSelect.onchange();
             bowlingSelect.onchange();
@@ -79,6 +299,86 @@ async function initSetup() {
         alert("Error loading teams: " + e.message);
     }
 }
+
+window.onSetupTournamentChange = async function() {
+    let tournSelect = document.getElementById("setup-tournament");
+    let grpSelect = document.getElementById("setup-group");
+    let oversInp = document.getElementById("setup-overs");
+    if (!tournSelect || !grpSelect) return;
+    let tournId = tournSelect.value;
+    grpSelect.innerHTML = `<option value="">-- No Group / Standalone --</option>`;
+    
+    if (tournId) {
+        try {
+            let tourns = await TournamentAPI.getTournaments();
+            let selectedT = (tourns || []).find(t => t.id == tournId);
+            if (selectedT && selectedT.max_overs && oversInp) {
+                oversInp.value = selectedT.max_overs;
+            }
+
+            let groups = await TournamentAPI.getGroups(tournId);
+            (groups || []).forEach(g => {
+                let opt = document.createElement("option");
+                opt.value = g.id;
+                opt.text = g.name;
+                grpSelect.add(opt);
+            });
+        } catch(e) {
+            console.error("Error updating setup groups:", e);
+        }
+    }
+    
+    if (window.onSetupGroupChange) {
+        await window.onSetupGroupChange();
+    }
+};
+
+window.onSetupGroupChange = async function() {
+    let grpSelect = document.getElementById("setup-group");
+    let tournSelect = document.getElementById("setup-tournament");
+    let battingSelect = document.getElementById("setup-batting-team");
+    let bowlingSelect = document.getElementById("setup-bowling-team");
+
+    if (!battingSelect || !bowlingSelect) return;
+    
+    let currentBat = battingSelect.value;
+    let currentBowl = bowlingSelect.value;
+    
+    let teamsToLoad = allTeamsData; // Default to all teams
+
+    if (grpSelect && grpSelect.value && tournSelect && tournSelect.value) {
+        try {
+            let groups = await TournamentAPI.getGroups(tournSelect.value);
+            let selectedGroup = groups.find(g => g.id == grpSelect.value);
+            if (selectedGroup && selectedGroup.teams) {
+                teamsToLoad = allTeamsData.filter(t => selectedGroup.teams.includes(t.id));
+            }
+        } catch(e) {
+            console.error("Error filtering teams by group:", e);
+        }
+    }
+
+    battingSelect.innerHTML = "";
+    bowlingSelect.innerHTML = "";
+
+    teamsToLoad.forEach(t => {
+        let opt1 = document.createElement("option");
+        opt1.value = t.id;
+        opt1.text = t.name;
+        battingSelect.add(opt1);
+        
+        let opt2 = document.createElement("option");
+        opt2.value = t.id;
+        opt2.text = t.name;
+        bowlingSelect.add(opt2);
+    });
+
+    if (currentBat && teamsToLoad.some(t => t.id == currentBat)) battingSelect.value = currentBat;
+    if (currentBowl && teamsToLoad.some(t => t.id == currentBowl)) bowlingSelect.value = currentBowl;
+
+    if (battingSelect.onchange) battingSelect.onchange();
+    if (bowlingSelect.onchange) bowlingSelect.onchange();
+};
 
 async function startMatch() {
     let batId = document.getElementById("setup-batting-team").value;
@@ -90,13 +390,18 @@ async function startMatch() {
     let nonstriker = document.getElementById("setup-nonstriker").value;
     let bowler = document.getElementById("setup-bowler").value;
     let overs = document.getElementById("setup-overs").value;
+
+    let tournSelect = document.getElementById("setup-tournament");
+    let tournId = tournSelect && tournSelect.value ? tournSelect.value : null;
+    let grpSelect = document.getElementById("setup-group");
+    let grpId = grpSelect && grpSelect.value ? grpSelect.value : null;
     
     if(striker === nonstriker) {
         alert("Striker and Non-Striker cannot be the same!");
         return;
     }
     
-    await eel.start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, overs)();
+    await eel.start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, overs, tournId, grpId)();
     
     document.getElementById("setup-screen").classList.add("hidden");
     document.getElementById("scoring-screen").classList.remove("hidden");
@@ -808,6 +1113,28 @@ async function refreshUI() {
         }
     }
 
+    // Speed Scale Controller & Status sync
+    let scSlider = document.getElementById("scale-slider");
+    let scStatus = document.getElementById("scale-overlay-status");
+    if (state.ball_speed) {
+        let speedVal = parseFloat(state.ball_speed);
+        if (scSlider && !isNaN(speedVal) && document.activeElement !== scSlider) {
+            scSlider.value = speedVal;
+            if (typeof window.updateScaleIndicatorDisplay === 'function') {
+                window.updateScaleIndicatorDisplay(speedVal);
+            }
+        }
+        if (scStatus) {
+            scStatus.innerText = `${state.ball_speed} km/h (Live)`;
+            scStatus.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30";
+        }
+    } else {
+        if (scStatus) {
+            scStatus.innerText = "No Speed";
+            scStatus.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700";
+        }
+    }
+
     // Auto-show match summary if match is over
     if (state.match_over) {
         showMatchOverPrompt();
@@ -1512,11 +1839,59 @@ window.undoFromSummary = async function() {
     refreshUI();
 };
 
-window.startNewMatch = function() {
+window.resumeActiveMatch = async function() {
+    let state = await eel.get_state()();
+    document.getElementById("setup-screen").classList.add("hidden");
+    if (state && state.match_over) {
+        document.getElementById("scoring-screen").classList.add("hidden");
+        document.getElementById("match-summary-screen").classList.remove("hidden");
+        showMatchOverPrompt();
+    } else {
+        document.getElementById("match-summary-screen").classList.add("hidden");
+        document.getElementById("scoring-screen").classList.remove("hidden");
+        refreshUI();
+    }
+};
+
+window.startNewMatch = async function() {
+    if (window.eel && typeof eel.reset_match === 'function') {
+        try {
+            await eel.reset_match()();
+        } catch (e) {
+            console.error("Error resetting match:", e);
+        }
+    }
     document.getElementById("match-summary-screen").classList.add("hidden");
     document.getElementById("scoring-screen").classList.add("hidden");
     document.getElementById("setup-screen").classList.remove("hidden");
+    
+    let resumeBanner = document.getElementById("setup-resume-banner");
+    if (resumeBanner) resumeBanner.classList.add("hidden");
+
     initSetup();
+};
+
+window.confirmResetCurrentMatch = function() {
+    closeModal();
+    let html = `
+        <div class="p-4 bg-rose-600 text-white font-bold text-base flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <span>⚠️</span>
+                <span>Reset Match & Start Fresh?</span>
+            </div>
+            <button onclick="closeModal()" class="text-white hover:text-slate-200 text-xl font-bold cursor-pointer">&times;</button>
+        </div>
+        <div class="p-6 flex flex-col gap-4">
+            <p class="text-sm text-slate-600">
+                Are you sure you want to discard this match? All current scoring data will be reset and you will return to the match setup screen.
+            </p>
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer">Cancel</button>
+                <button onclick="closeModal(); startNewMatch();" class="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider shadow-md transition-all active:scale-98 cursor-pointer">Yes, Reset Match</button>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[440px]");
 };
 
 async function scoreBall(runs) {
@@ -1984,6 +2359,18 @@ window.showMoreOptionsModal = async function() {
                     <div class="text-xs text-slate-400 mt-0.5">Format cannot be modified after the 1st innings has completed</div>
                 </div>
                 `}
+                
+                <!-- Reset Match -->
+                <button onclick="confirmResetCurrentMatch()" class="flex flex-col text-left p-4 bg-white hover:bg-rose-50/50 border border-slate-200 hover:border-rose-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99] cursor-pointer">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-rose-100 text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">Dangerous</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-rose-700 text-sm">Reset & Start New Match</div>
+                    <div class="text-xs text-slate-500 mt-0.5">Discard current match data and return to setup screen</div>
+                </button>
 
             </div>
 
@@ -2994,7 +3381,7 @@ window.switchSidebarTab = function(tabName) {
     currentSidebarTab = tabName;
     
     // Update nav button styling
-    ['scoreboard', 'teams', 'players'].forEach(t => {
+    ['scoreboard', 'teams', 'players', 'tournaments', 'stats'].forEach(t => {
         let btn = document.getElementById(`nav-tab-${t}`);
         let view = document.getElementById(`view-${t}`);
         if (btn) {
@@ -3017,6 +3404,10 @@ window.switchSidebarTab = function(tabName) {
         loadTeamsView();
     } else if (tabName === 'players') {
         loadPlayersView();
+    } else if (tabName === 'tournaments') {
+        loadTournamentsView();
+    } else if (tabName === 'stats') {
+        loadStatsView();
     }
 };
 
@@ -3035,6 +3426,10 @@ async function updateSidebarBadges() {
         let playersCount = allPlayersData ? allPlayersData.length : 0;
         let pBadge = document.getElementById("badge-players-count");
         if (pBadge) pBadge.innerText = playersCount;
+
+        let tourns = await TournamentAPI.getTournaments();
+        let tournBadge = document.getElementById("badge-tournaments-count");
+        if (tournBadge) tournBadge.innerText = (tourns ? tourns.length : 0);
     } catch(e) {
         console.error("Error updating badges:", e);
     }
@@ -4217,6 +4612,1209 @@ window.setTeamColor = function(color) {
     if (picker) picker.value = color;
 };
 
-// Initial setup
-initSetup();
+// =========================================================================
+// BALL SPEED GUN HANDLERS
+// =========================================================================
+
+window.submitBallSpeed = async function() {
+    const input = document.getElementById("input-ball-speed");
+    if (!input) return;
+    const val = input.value.trim();
+    if (!val) {
+        showToast("Please enter a ball speed value", "error");
+        return;
+    }
+    try {
+        await eel.set_ball_speed(val)();
+        showToast(`Ball speed ${val} km/h sent to screen overlay`, "success");
+        refreshUI();
+    } catch (e) {
+        console.error("Error setting ball speed:", e);
+        showToast("Failed to send ball speed", "error");
+    }
+};
+
+window.clearBallSpeed = async function() {
+    const input = document.getElementById("input-ball-speed");
+    if (input) input.value = "";
+    try {
+        await eel.set_ball_speed(null)();
+        showToast("Ball speed cleared from overlay", "info");
+        refreshUI();
+    } catch (e) {
+        console.error("Error clearing ball speed:", e);
+    }
+};
+
+window.quickSetSpeed = async function(speed) {
+    const input = document.getElementById("input-ball-speed");
+    if (input) input.value = speed;
+    await window.submitBallSpeed();
+};
+
+// =========================================================================
+// RIGHT ADMIN PANEL: SPEED SCALE CONTROLLER & SPEED INDICATOR
+// =========================================================================
+
+window.toggleRightPanel = function() {
+    // Right panel is permanently sticky in the scoring section
+};
+
+window.updateScaleIndicatorDisplay = function(val) {
+    const num = parseFloat(val) || 0;
+    const formatted = num.toFixed(1);
+
+    const speedDisp = document.getElementById("scale-speed-display");
+    if (speedDisp) speedDisp.innerText = formatted;
+
+    const mphDisp = document.getElementById("scale-mph-display");
+    if (mphDisp) {
+        const mph = (num * 0.621371).toFixed(1);
+        mphDisp.innerText = `${mph} mph`;
+    }
+
+    const badge = document.getElementById("scale-pace-badge");
+    if (badge) {
+        if (num < 105) {
+            badge.innerText = "Spin / Slow 🌀";
+            badge.className = "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-500/20 text-sky-400 border border-sky-500/30";
+        } else if (num < 126) {
+            badge.innerText = "Medium Pace 🎯";
+            badge.className = "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        } else if (num < 143) {
+            badge.innerText = "Fast Pace ⚡";
+            badge.className = "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30";
+        } else {
+            badge.innerText = "Express Fast 🔥";
+            badge.className = "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse";
+        }
+    }
+};
+
+let autoSyncTimeout = null;
+window.onScaleSliderInput = function(val) {
+    window.updateScaleIndicatorDisplay(val);
+
+    const autoSync = document.getElementById("auto-sync-speed-toggle");
+    if (autoSync && autoSync.checked) {
+        clearTimeout(autoSyncTimeout);
+        autoSyncTimeout = setTimeout(async () => {
+            await window.sendScaleSpeed(false);
+        }, 120);
+    }
+};
+
+window.onScaleSliderChange = async function(val) {
+    window.updateScaleIndicatorDisplay(val);
+    const autoSync = document.getElementById("auto-sync-speed-toggle");
+    if (autoSync && autoSync.checked) {
+        await window.sendScaleSpeed(false);
+    }
+};
+
+window.sendScaleSpeed = async function(showFeedback = true) {
+    const slider = document.getElementById("scale-slider");
+    if (!slider) return;
+    const val = parseFloat(slider.value).toFixed(1);
+    try {
+        await eel.set_ball_speed(val)();
+        const statusBadge = document.getElementById("scale-overlay-status");
+        if (statusBadge) {
+            statusBadge.innerText = `${val} km/h (Live)`;
+            statusBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30";
+        }
+        if (showFeedback) {
+            showToast(`Ball speed ${val} km/h sent to screen overlay`, "success");
+        }
+        refreshUI();
+    } catch (e) {
+        console.error("Error broadcasting speed:", e);
+    }
+};
+
+window.clearScaleSpeed = async function() {
+    try {
+        await eel.set_ball_speed(null)();
+        const statusBadge = document.getElementById("scale-overlay-status");
+        if (statusBadge) {
+            statusBadge.innerText = "Cleared";
+            statusBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700";
+        }
+        showToast("Ball speed cleared from overlay", "info");
+        refreshUI();
+    } catch (e) {
+        console.error("Error clearing scale speed:", e);
+    }
+};
+
+window.stepSpeed = function(delta) {
+    const slider = document.getElementById("scale-slider");
+    if (!slider) return;
+    let cur = parseFloat(slider.value) || 140;
+    let nextVal = Math.max(60, Math.min(165, cur + delta));
+    slider.value = nextVal;
+    window.onScaleSliderInput(nextVal);
+    window.onScaleSliderChange(nextVal);
+};
+
+window.setScalePreset = function(preset) {
+    const slider = document.getElementById("scale-slider");
+    if (!slider) return;
+    slider.value = preset;
+    window.onScaleSliderInput(preset);
+    window.onScaleSliderChange(preset);
+    showToast(`Preset: ${preset} km/h applied`, "info");
+};
+
+// =========================================================================
+// App Initialization & State Restoration
+// =========================================================================
+async function initApp() {
+    try {
+        let state = null;
+        if (window.eel && typeof eel.get_state === 'function') {
+            state = await eel.get_state()();
+        }
+
+        let hasActiveMatch = Boolean(
+            state &&
+            typeof state === 'object' &&
+            state.team_1_name &&
+            (state.striker || state.overs_completed !== undefined || state.innings_1_stats)
+        );
+
+        let resumeBanner = document.getElementById("setup-resume-banner");
+        let resumeTitle = document.getElementById("resume-banner-title");
+        let resumeSub = document.getElementById("resume-banner-subtitle");
+
+        if (hasActiveMatch) {
+            if (resumeBanner && resumeTitle && resumeSub) {
+                resumeTitle.innerText = `Active Match: ${state.team_1_name} vs ${state.team_2_name}`;
+                let oversText = `${state.overs_completed || 0}.${state.balls_this_over || 0} ov`;
+                resumeSub.innerText = `Innings ${state.innings || 1} • ${state.runs || 0}/${state.wickets || 0} (${oversText}) in progress.`;
+                resumeBanner.classList.remove("hidden");
+            }
+
+            document.getElementById("setup-screen").classList.add("hidden");
+
+            if (state.match_over) {
+                document.getElementById("scoring-screen").classList.add("hidden");
+                document.getElementById("match-summary-screen").classList.remove("hidden");
+                await showMatchOverPrompt();
+            } else {
+                document.getElementById("match-summary-screen").classList.add("hidden");
+                document.getElementById("scoring-screen").classList.remove("hidden");
+                await refreshUI();
+
+                if (state.innings === 2 && !state.striker) {
+                    showInnings2SetupPrompt(state.target || (state.innings_1_stats ? state.innings_1_stats.runs + 1 : 1));
+                }
+            }
+
+            // Populate setup dropdowns in background for team/player management tabs
+            initSetup();
+        } else {
+            if (resumeBanner) resumeBanner.classList.add("hidden");
+            document.getElementById("match-summary-screen").classList.add("hidden");
+            document.getElementById("scoring-screen").classList.add("hidden");
+            document.getElementById("setup-screen").classList.remove("hidden");
+            await initSetup();
+        }
+    } catch (err) {
+        console.error("[initApp] App initialization error:", err);
+        document.getElementById("match-summary-screen").classList.add("hidden");
+        document.getElementById("scoring-screen").classList.add("hidden");
+        document.getElementById("setup-screen").classList.remove("hidden");
+        initSetup();
+    }
+}
+
+// Initial startup
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
+
+// =========================================================================
+// Native JavaScript EventSource API: Listen to SSE stream for UI updates
+// =========================================================================
+(function initMatchStreamSSE() {
+    try {
+        const streamUrl = "http://127.0.0.1:8000/api/stream/";
+        const evtSource = new EventSource(streamUrl);
+
+        evtSource.onmessage = function(e) {
+            try {
+                if (!e.data || !e.data.trim()) return;
+                const matchState = JSON.parse(e.data);
+                if (matchState && typeof matchState === 'object' && Object.keys(matchState).length > 0) {
+                    if (matchState.team_1_name && (matchState.striker || matchState.overs_completed !== undefined || matchState.innings_1_stats)) {
+                        let setupEl = document.getElementById("setup-screen");
+                        if (setupEl && !setupEl.classList.contains("hidden")) {
+                            setupEl.classList.add("hidden");
+                            let scoreEl = document.getElementById("scoring-screen");
+                            if (scoreEl && !matchState.match_over) scoreEl.classList.remove("hidden");
+                        }
+                    }
+                    if (typeof refreshUI === 'function') {
+                        refreshUI();
+                    }
+                }
+            } catch (err) {
+                console.warn("[SSE] Parse error in Eel web client:", err);
+            }
+        };
+
+        evtSource.onerror = function() {
+            // Native EventSource automatically retries connection
+        };
+    } catch (err) {
+        console.warn("[SSE] EventSource init error in Eel frontend:", err);
+    }
+})();
+
+// =========================================================================
+// TOURNAMENT MANAGEMENT & GROUP POINTS TABLE SYSTEM
+// =========================================================================
+
+let allTournamentsData = [];
+let selectedTournamentId = null;
+let allGroupsData = [];
+let selectedGroupId = null;
+let currentStandingsData = [];
+
+window.loadTournamentsView = async function() {
+    try {
+        let emptyEl = document.getElementById("tournaments-empty-state");
+        let contentEl = document.getElementById("tournaments-main-content");
+        let select = document.getElementById("tournament-select");
+
+        let tourns = await TournamentAPI.getTournaments();
+        allTournamentsData = tourns || [];
+        updateSidebarBadges();
+
+        if (allTournamentsData.length === 0) {
+            if (emptyEl) emptyEl.classList.remove("hidden");
+            if (contentEl) contentEl.classList.add("hidden");
+            selectedTournamentId = null;
+            selectedGroupId = null;
+            return;
+        }
+
+        if (emptyEl) emptyEl.classList.add("hidden");
+        if (contentEl) contentEl.classList.remove("hidden");
+
+        if (select) {
+            select.innerHTML = allTournamentsData.map(t => {
+                let seasonLabel = t.season ? `(${t.season})` : `(${t.max_overs || 20} Ov)`;
+                return `<option value="${t.id}">${escapeHtml(t.name)} ${seasonLabel}</option>`;
+            }).join("");
+        }
+
+        if (!selectedTournamentId || !allTournamentsData.some(t => t.id === selectedTournamentId)) {
+            selectedTournamentId = allTournamentsData[0].id;
+        }
+
+        if (select) select.value = selectedTournamentId;
+        await window.onTournamentSelected(selectedTournamentId);
+
+    } catch (err) {
+        console.error("Error loading tournaments view:", err);
+        showToast("Error loading tournaments: " + err.message, "error");
+    }
+};
+
+window.onTournamentSelected = async function(tournId) {
+    if (!tournId) return;
+    selectedTournamentId = tournId;
+    let t = allTournamentsData.find(x => x.id === tournId);
+
+    let seasonVal = document.getElementById("tournament-meta-season-val");
+    if (seasonVal) seasonVal.innerText = (t && t.season) ? `Season: ${t.season}` : "General Season";
+
+    let oversVal = document.getElementById("tournament-meta-overs-val");
+    if (oversVal) oversVal.innerText = `${(t && t.max_overs) ? t.max_overs : 20} Overs Quota`;
+
+    try {
+        let groups = await TournamentAPI.getGroups(tournId);
+        allGroupsData = groups || [];
+
+        let groupsVal = document.getElementById("tournament-meta-groups-val");
+        if (groupsVal) groupsVal.innerText = `${allGroupsData.length} Group${allGroupsData.length === 1 ? '' : 's'}`;
+
+        let groupsBadge = document.getElementById("groups-count-badge");
+        if (groupsBadge) groupsBadge.innerText = allGroupsData.length;
+
+        let tabsList = document.getElementById("group-tabs-list");
+        if (!tabsList) return;
+
+        if (allGroupsData.length === 0) {
+            tabsList.innerHTML = `
+                <div class="text-xs text-slate-400 py-1 italic">No groups in this tournament yet. Click "+ Add Group" to create one.</div>
+            `;
+            let groupContainer = document.getElementById("group-active-container");
+            if (groupContainer) {
+                groupContainer.innerHTML = `
+                    <div class="bg-white rounded-2xl p-12 border border-slate-200 text-center shadow-sm">
+                        <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-3xl mx-auto mb-3">📂</div>
+                        <h4 class="font-bold text-slate-800 text-base">No Groups Created Yet</h4>
+                        <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">Create group stages (e.g. Group A, Pool 1) and assign competing teams to generate points tables.</p>
+                        <button onclick="openCreateGroupModal()" class="mt-4 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer">
+                            + Create Group
+                        </button>
+                    </div>
+                `;
+            }
+            selectedGroupId = null;
+            return;
+        }
+
+        // Restore active container HTML if previously emptied
+        let groupContainer = document.getElementById("group-active-container");
+        if (groupContainer && !document.getElementById("points-table-tbody")) {
+            groupContainer.innerHTML = `
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <h2 id="active-group-name" class="heading-font text-2xl font-black text-slate-900">Group</h2>
+                            <span id="active-group-teams-count" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">0 Teams Assigned</span>
+                        </div>
+                        <div id="active-group-teams-chips" class="flex flex-wrap items-center gap-2 mt-2"></div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button onclick="openAssignTeamsModal()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-md shadow-emerald-600/20 active:scale-98 transition-all flex items-center gap-1.5 cursor-pointer">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                            <span>Assign Teams</span>
+                        </button>
+                        <button onclick="openRenameGroupModal()" title="Rename Group" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-colors cursor-pointer">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                        </button>
+                        <button onclick="confirmDeleteGroup()" title="Delete Group" class="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-colors cursor-pointer">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                        <div class="flex items-center gap-2">
+                            <span class="text-base font-bold text-slate-800 heading-font">Official Points Table</span>
+                            <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">ICC NRR System</span>
+                        </div>
+                        <div class="flex items-center gap-3 text-xs text-slate-500">
+                            <span class="flex items-center gap-1 font-medium"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Win = 2 Pts</span>
+                            <span class="flex items-center gap-1 font-medium"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Tie / NR = 1 Pt</span>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 select-none">
+                                    <th class="py-3.5 px-4 w-16 text-center">Rank</th>
+                                    <th class="py-3.5 px-4">Team</th>
+                                    <th class="py-3.5 px-3 text-center" title="Played">P</th>
+                                    <th class="py-3.5 px-3 text-center text-emerald-700" title="Won">W</th>
+                                    <th class="py-3.5 px-3 text-center text-rose-600" title="Lost">L</th>
+                                    <th class="py-3.5 px-3 text-center" title="No Result">NR</th>
+                                    <th class="py-3.5 px-4 text-center font-extrabold text-slate-900 bg-slate-100/60" title="Total Points">Pts</th>
+                                    <th class="py-3.5 px-4 text-center font-extrabold text-slate-800" title="Net Run Rate">NRR</th>
+                                    <th class="py-3.5 px-4 text-right text-slate-400 font-mono text-[10px] hidden md:table-cell">Runs / Overs (Scored vs Conceded)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="points-table-tbody" class="divide-y divide-slate-100"></tbody>
+                        </table>
+                    </div>
+                    <div class="px-6 py-3 bg-slate-50 border-t border-slate-200/80 text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="font-bold text-slate-700">Sorting Order:</span>
+                            <span>Points DESC → Wins DESC → NRR DESC.</span>
+                        </div>
+                        <div>
+                            <span class="font-bold text-slate-700">All-Out Rule Active:</span> If bowled out, overs faced is computed as the full match overs quota.
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (!selectedGroupId || !allGroupsData.some(g => g.id === selectedGroupId)) {
+            selectedGroupId = allGroupsData[0].id;
+        }
+
+        renderGroupTabsList();
+        await window.onGroupSelected(selectedGroupId);
+
+    } catch (err) {
+        console.error("Error loading groups for tournament:", err);
+        showToast("Error loading groups: " + err.message, "error");
+    }
+};
+
+function renderGroupTabsList() {
+    let tabsList = document.getElementById("group-tabs-list");
+    if (!tabsList) return;
+
+    tabsList.innerHTML = allGroupsData.map(g => {
+        let isSel = (g.id === selectedGroupId);
+        let activeClasses = isSel 
+            ? "bg-emerald-600 text-white font-bold shadow-md shadow-emerald-600/20 border-emerald-600" 
+            : "bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-semibold border-slate-200";
+        let count = g.team_count || (g.teams ? g.teams.length : 0);
+        return `
+            <button onclick="onGroupSelected('${g.id}')" class="px-4 py-2 rounded-xl text-xs border transition-all whitespace-nowrap flex items-center gap-2 cursor-pointer ${activeClasses}">
+                <span>${escapeHtml(g.name)}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isSel ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 text-slate-500'}">${count}</span>
+            </button>
+        `;
+    }).join("") + `
+        <button onclick="openCreateGroupModal()" class="px-3 py-2 rounded-xl text-xs border border-dashed border-slate-300 text-slate-500 hover:text-emerald-700 hover:border-emerald-500 transition-all whitespace-nowrap flex items-center gap-1 font-bold cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            <span>Add Group</span>
+        </button>
+    `;
+}
+
+window.onGroupSelected = async function(groupId) {
+    if (!groupId) return;
+    selectedGroupId = groupId;
+    renderGroupTabsList();
+
+    let group = allGroupsData.find(g => g.id === groupId);
+    if (!group) return;
+
+    let groupNameEl = document.getElementById("active-group-name");
+    if (groupNameEl) groupNameEl.innerText = group.name;
+
+    let teamsCountEl = document.getElementById("active-group-teams-count");
+    let count = group.team_count || (group.teams ? group.teams.length : 0);
+    if (teamsCountEl) teamsCountEl.innerText = `${count} Team${count === 1 ? '' : 's'} Assigned`;
+
+    let chipsEl = document.getElementById("active-group-teams-chips");
+    if (chipsEl) {
+        if (!group.team_details || group.team_details.length === 0) {
+            chipsEl.innerHTML = `<span class="text-xs text-slate-400 italic">No teams assigned yet. Click "Assign Teams" to select clubs.</span>`;
+        } else {
+            chipsEl.innerHTML = group.team_details.map(td => {
+                let logoHtml = td.logo
+                    ? `<img src="${td.logo}" class="w-4 h-4 object-contain rounded-full bg-white">`
+                    : `<span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: ${td.theme_color || '#059669'}"></span>`;
+                return `
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 border border-slate-200 text-slate-700">
+                        ${logoHtml}
+                        <span>${escapeHtml(td.name)}</span>
+                    </span>
+                `;
+            }).join("");
+        }
+    }
+
+    let tbody = document.getElementById("points-table-tbody");
+    if (tbody) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" class="py-8 text-center text-slate-400">
+                    <div class="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                    <span class="text-xs font-semibold">Calculating points and Net Run Rate...</span>
+                </td>
+            </tr>
+        `;
+    }
+
+    try {
+        let standings = await TournamentAPI.getGroupStandings(groupId);
+        currentStandingsData = standings || [];
+        window.renderPointsTable(currentStandingsData, group);
+    } catch (err) {
+        console.error("Error fetching standings:", err);
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-red-500 text-xs">Failed to calculate standings: ${escapeHtml(err.message)}</td></tr>`;
+        }
+    }
+};
+
+window.renderPointsTable = function(standings, group) {
+    let tbody = document.getElementById("points-table-tbody");
+    if (!tbody) return;
+
+    if (!standings || standings.length === 0) {
+        if (group && group.team_details && group.team_details.length > 0) {
+            // Render default zeroed rows for assigned teams
+            standings = group.team_details.map((t, idx) => ({
+                rank: idx + 1,
+                team_id: t.id,
+                team_name: t.name,
+                team_logo: t.logo,
+                team_color: t.theme_color,
+                played: 0,
+                won: 0,
+                lost: 0,
+                tied: 0,
+                no_result: 0,
+                points: 0,
+                nrr: 0.0,
+                nrr_formatted: "0.000",
+                runs_scored: 0,
+                overs_faced_display: 0.0,
+                runs_conceded: 0,
+                overs_bowled_display: 0.0
+            }));
+        } else {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="py-12 text-center text-slate-400">
+                        <div class="text-3xl mb-2">🏏</div>
+                        <p class="font-bold text-slate-700 text-sm">No Teams in This Group</p>
+                        <p class="text-xs text-slate-400 mt-1">Click "Assign Teams" above to select clubs and generate the points table.</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+    }
+
+    tbody.innerHTML = standings.map(s => {
+        let rankBadge = "";
+        if (s.rank === 1) {
+            rankBadge = `<span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-900 font-extrabold text-xs border border-amber-300 shadow-sm" title="1st Place">🥇 1</span>`;
+        } else if (s.rank === 2) {
+            rankBadge = `<span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-100 text-slate-800 font-extrabold text-xs border border-slate-300 shadow-sm" title="2nd Place">🥈 2</span>`;
+        } else if (s.rank === 3) {
+            rankBadge = `<span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700/10 text-amber-900 font-extrabold text-xs border border-amber-600/30 shadow-sm" title="3rd Place">🥉 3</span>`;
+        } else {
+            rankBadge = `<span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-50 text-slate-600 font-bold text-xs border border-slate-200">${s.rank}</span>`;
+        }
+
+        let logoHtml = s.team_logo
+            ? `<img src="${s.team_logo}" class="w-8 h-8 rounded-xl object-contain bg-white p-0.5 border border-slate-200 shadow-sm">`
+            : `<div class="w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs text-white shadow-sm" style="background-color: ${s.team_color || '#0f547c'}">
+                 ${escapeHtml(formatInitials(s.team_name))}
+               </div>`;
+
+        let nrrPillClass = "bg-slate-100 text-slate-600 border-slate-200";
+        if (s.nrr > 0) {
+            nrrPillClass = "bg-emerald-50 text-emerald-800 border-emerald-200 font-extrabold";
+        } else if (s.nrr < 0) {
+            nrrPillClass = "bg-rose-50 text-rose-800 border-rose-200 font-extrabold";
+        }
+
+        let scoredText = `${s.runs_scored || 0} (${s.overs_faced_display || 0} ov)`;
+        let concededText = `${s.runs_conceded || 0} (${s.overs_bowled_display || 0} ov)`;
+
+        return `
+            <tr class="hover:bg-slate-50/80 transition-colors">
+                <td class="py-3 px-4 text-center font-bold">${rankBadge}</td>
+                <td class="py-3 px-4">
+                    <div class="flex items-center gap-3">
+                        ${logoHtml}
+                        <div>
+                            <div class="font-extrabold text-slate-900 text-sm">${escapeHtml(s.team_name)}</div>
+                            <div class="text-[10px] text-slate-400 font-medium md:hidden">Scored: ${scoredText} • Conceded: ${concededText}</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="py-3 px-3 text-center font-bold text-slate-700">${s.played || 0}</td>
+                <td class="py-3 px-3 text-center font-bold text-emerald-700">${s.won || 0}</td>
+                <td class="py-3 px-3 text-center font-bold text-rose-600">${s.lost || 0}</td>
+                <td class="py-3 px-3 text-center font-bold text-slate-500">${s.no_result || 0}</td>
+                <td class="py-3 px-4 text-center bg-slate-50/60">
+                    <span class="inline-block px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-900 font-black text-sm border border-emerald-500/20">${s.points || 0}</span>
+                </td>
+                <td class="py-3 px-4 text-center">
+                    <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-mono border ${nrrPillClass}">${s.nrr_formatted || '0.000'}</span>
+                </td>
+                <td class="py-3 px-4 text-right font-mono text-[11px] text-slate-500 hidden md:table-cell">
+                    <span>${scoredText}</span>
+                    <span class="text-slate-300 mx-1">/</span>
+                    <span>${concededText}</span>
+                </td>
+            </tr>
+        `;
+    }).join("");
+};
+
+// ---------------------------------------------------------------------------
+// Tournament & Group Modals
+// ---------------------------------------------------------------------------
+
+window.openCreateTournamentModal = function() {
+    let currentYear = new Date().getFullYear();
+    let html = `
+        <div class="p-5 bg-gradient-to-r from-emerald-700 to-teal-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-lg">🏆</div>
+                <div>
+                    <div class="text-sm font-bold text-white">Create New Tournament</div>
+                    <div class="text-[11px] text-emerald-200 font-normal">Championship league configuration</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl cursor-pointer">&times;</button>
+        </div>
+        
+        <form onsubmit="submitCreateTournament(event)" class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Tournament Name *</label>
+                <input id="create-tourn-name" type="text" required placeholder="e.g. Premier Cricket League, T20 World Trophy" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Season / Year</label>
+                    <input id="create-tourn-season" type="text" value="${currentYear}" placeholder="e.g. 2026, Summer 2026" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Max Overs Quota *</label>
+                    <input id="create-tourn-overs" type="number" value="20" min="1" max="100" required class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+                </div>
+            </div>
+
+            <div class="p-3 bg-emerald-50 border border-emerald-200/80 rounded-xl text-xs text-emerald-950 flex items-start gap-2">
+                <svg class="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                <span>The maximum overs quota is used to calculate NRR and enforces the All-Out Rule when a team is bowled out early.</span>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 mt-2">
+                <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider cursor-pointer">Cancel</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/30 transition-all active:scale-98 cursor-pointer">Create Tournament</button>
+            </div>
+        </form>
+    `;
+    showModal(html, "w-[480px]");
+};
+
+window.submitCreateTournament = async function(e) {
+    e.preventDefault();
+    let name = document.getElementById("create-tourn-name").value.trim();
+    let season = document.getElementById("create-tourn-season").value.trim();
+    let overs = parseInt(document.getElementById("create-tourn-overs").value) || 20;
+
+    if (!name) {
+        showToast("Tournament name is required", "error");
+        return;
+    }
+
+    try {
+        let res = await TournamentAPI.createTournament(name, season, overs);
+        showToast(`Tournament "${name}" created!`);
+        closeModal();
+        if (res && res.id) selectedTournamentId = res.id;
+        await loadTournamentsView();
+        await initSetup();
+    } catch (err) {
+        console.error("Error creating tournament:", err);
+        showToast("Failed to create tournament: " + err.message, "error");
+    }
+};
+
+window.openEditTournamentModal = function() {
+    let t = allTournamentsData.find(x => x.id === selectedTournamentId);
+    if (!t) return;
+
+    let html = `
+        <div class="p-5 bg-gradient-to-r from-emerald-700 to-teal-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-lg">✏️</div>
+                <div>
+                    <div class="text-sm font-bold text-white">Edit Tournament</div>
+                    <div class="text-[11px] text-emerald-200 font-normal">Modify tournament information</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl cursor-pointer">&times;</button>
+        </div>
+        
+        <form onsubmit="submitEditTournament(event)" class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Tournament Name *</label>
+                <input id="edit-tourn-name" type="text" required value="${escapeHtml(t.name)}" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Season / Year</label>
+                    <input id="edit-tourn-season" type="text" value="${escapeHtml(t.season || '')}" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Max Overs Quota *</label>
+                    <input id="edit-tourn-overs" type="number" value="${t.max_overs || 20}" min="1" max="100" required class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 mt-2">
+                <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider cursor-pointer">Cancel</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/30 transition-all active:scale-98 cursor-pointer">Save Changes</button>
+            </div>
+        </form>
+    `;
+    showModal(html, "w-[480px]");
+};
+
+window.submitEditTournament = async function(e) {
+    e.preventDefault();
+    let name = document.getElementById("edit-tourn-name").value.trim();
+    let season = document.getElementById("edit-tourn-season").value.trim();
+    let overs = parseInt(document.getElementById("edit-tourn-overs").value) || 20;
+
+    try {
+        await TournamentAPI.updateTournament(selectedTournamentId, name, season, overs);
+        showToast("Tournament updated successfully!");
+        closeModal();
+        await loadTournamentsView();
+        await initSetup();
+    } catch (err) {
+        console.error("Error updating tournament:", err);
+        showToast("Failed to update tournament: " + err.message, "error");
+    }
+};
+
+window.confirmDeleteTournament = function() {
+    let t = allTournamentsData.find(x => x.id === selectedTournamentId);
+    if (!t) return;
+
+    let html = `
+        <div class="p-5 bg-rose-600 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <span>⚠️</span>
+                <span>Delete Tournament?</span>
+            </div>
+            <button onclick="closeModal()" class="text-white hover:text-slate-200 text-xl font-bold cursor-pointer">&times;</button>
+        </div>
+        <div class="p-6 flex flex-col gap-4">
+            <p class="text-sm text-slate-600">
+                Are you sure you want to delete <strong class="text-slate-900">${escapeHtml(t.name)}</strong>? All its groups and points tables will also be removed.
+            </p>
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider cursor-pointer">Cancel</button>
+                <button onclick="submitDeleteTournament('${t.id}')" class="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider shadow-md transition-all active:scale-98 cursor-pointer">Delete Tournament</button>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[440px]");
+};
+
+window.submitDeleteTournament = async function(tournId) {
+    try {
+        await TournamentAPI.deleteTournament(tournId);
+        showToast("Tournament deleted!");
+        closeModal();
+        selectedTournamentId = null;
+        await loadTournamentsView();
+        await initSetup();
+    } catch (err) {
+        console.error("Error deleting tournament:", err);
+        showToast("Failed to delete tournament: " + err.message, "error");
+    }
+};
+
+window.openCreateGroupModal = function() {
+    if (allTournamentsData.length === 0) {
+        showToast("Please create a tournament first", "info");
+        openCreateTournamentModal();
+        return;
+    }
+
+    let tournOptions = allTournamentsData.map(t => {
+        let sel = (t.id === selectedTournamentId) ? "selected" : "";
+        return `<option value="${t.id}" ${sel}>${escapeHtml(t.name)}</option>`;
+    }).join("");
+
+    let teamsList = allTeamsData || [];
+    let teamsCheckboxes = teamsList.map(t => {
+        return `
+            <label class="flex items-center gap-3 p-2.5 rounded-xl bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/30 cursor-pointer transition-all">
+                <input type="checkbox" name="create-group-team-cb" value="${t.id}" class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500">
+                <span class="w-3 h-3 rounded-full shrink-0" style="background-color: ${t.theme_color || '#059669'}"></span>
+                <span class="text-xs font-bold text-slate-800">${escapeHtml(t.name)}</span>
+            </label>
+        `;
+    }).join("");
+
+    let html = `
+        <div class="p-5 bg-gradient-to-r from-emerald-700 to-teal-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-lg">📂</div>
+                <div>
+                    <div class="text-sm font-bold text-white">Create New Group</div>
+                    <div class="text-[11px] text-emerald-200 font-normal">Add group stage or pool to tournament</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl cursor-pointer">&times;</button>
+        </div>
+        
+        <form onsubmit="submitCreateGroup(event)" class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Championship Tournament *</label>
+                <select id="create-grp-tourn" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+                    ${tournOptions}
+                </select>
+            </div>
+            
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Group Name *</label>
+                <input id="create-grp-name" type="text" required placeholder="e.g. Group A, Pool 1, Super 8s" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+            </div>
+
+            <div>
+                <div class="flex items-center justify-between mb-1.5">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-600">Assign Participating Teams (Optional)</label>
+                    <span class="text-[11px] text-slate-400 font-semibold">${teamsList.length} clubs available</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1 bg-slate-100 rounded-xl border border-slate-200">
+                    ${teamsCheckboxes || '<div class="col-span-2 text-xs text-slate-400 text-center py-4">No clubs found. Create teams first in the Teams tab.</div>'}
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 mt-2">
+                <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider cursor-pointer">Cancel</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/30 transition-all active:scale-98 cursor-pointer">Create Group</button>
+            </div>
+        </form>
+    `;
+    showModal(html, "w-[500px]");
+};
+
+window.submitCreateGroup = async function(e) {
+    e.preventDefault();
+    let tournId = document.getElementById("create-grp-tourn").value;
+    let name = document.getElementById("create-grp-name").value.trim();
+
+    let checkedBoxes = document.querySelectorAll('input[name="create-group-team-cb"]:checked');
+    let teamIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+    if (!name) {
+        showToast("Group name is required", "error");
+        return;
+    }
+
+    try {
+        let res = await TournamentAPI.createGroup(tournId, name, teamIds);
+        showToast(`Group "${name}" created!`);
+        closeModal();
+        selectedTournamentId = tournId;
+        if (res && res.id) selectedGroupId = res.id;
+        await loadTournamentsView();
+        await initSetup();
+    } catch (err) {
+        console.error("Error creating group:", err);
+        showToast("Failed to create group: " + err.message, "error");
+    }
+};
+
+window.openRenameGroupModal = function() {
+    let group = allGroupsData.find(g => g.id === selectedGroupId);
+    if (!group) return;
+
+    let html = `
+        <div class="p-5 bg-gradient-to-r from-emerald-700 to-teal-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-lg">✏️</div>
+                <div>
+                    <div class="text-sm font-bold text-white">Rename Group</div>
+                    <div class="text-[11px] text-emerald-200 font-normal">Change group label</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl cursor-pointer">&times;</button>
+        </div>
+        
+        <form onsubmit="submitRenameGroup(event)" class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Group Name *</label>
+                <input id="rename-grp-name" type="text" required value="${escapeHtml(group.name)}" class="border border-slate-300 rounded-xl p-3 w-full bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm">
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 mt-2">
+                <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider cursor-pointer">Cancel</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/30 transition-all active:scale-98 cursor-pointer">Save</button>
+            </div>
+        </form>
+    `;
+    showModal(html, "w-[440px]");
+};
+
+window.submitRenameGroup = async function(e) {
+    e.preventDefault();
+    let name = document.getElementById("rename-grp-name").value.trim();
+    if (!name) return;
+
+    try {
+        await TournamentAPI.updateGroup(selectedGroupId, name);
+        showToast("Group renamed!");
+        closeModal();
+        await onTournamentSelected(selectedTournamentId);
+    } catch (err) {
+        console.error("Error renaming group:", err);
+        showToast("Failed to rename group: " + err.message, "error");
+    }
+};
+
+window.confirmDeleteGroup = function() {
+    let group = allGroupsData.find(g => g.id === selectedGroupId);
+    if (!group) return;
+
+    let html = `
+        <div class="p-5 bg-rose-600 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2">
+                <span>⚠️</span>
+                <span>Delete Group?</span>
+            </div>
+            <button onclick="closeModal()" class="text-white hover:text-slate-200 text-xl font-bold cursor-pointer">&times;</button>
+        </div>
+        <div class="p-6 flex flex-col gap-4">
+            <p class="text-sm text-slate-600">
+                Are you sure you want to delete <strong class="text-slate-900">${escapeHtml(group.name)}</strong>? All points table standings associated with this group will be removed.
+            </p>
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider cursor-pointer">Cancel</button>
+                <button onclick="submitDeleteGroup('${group.id}')" class="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider shadow-md transition-all active:scale-98 cursor-pointer">Delete Group</button>
+            </div>
+        </div>
+    `;
+    showModal(html, "w-[440px]");
+};
+
+window.submitDeleteGroup = async function(groupId) {
+    try {
+        await TournamentAPI.deleteGroup(groupId);
+        showToast("Group deleted!");
+        closeModal();
+        selectedGroupId = null;
+        await onTournamentSelected(selectedTournamentId);
+    } catch (err) {
+        console.error("Error deleting group:", err);
+        showToast("Failed to delete group: " + err.message, "error");
+    }
+};
+
+window.openAssignTeamsModal = function() {
+    let group = allGroupsData.find(g => g.id === selectedGroupId);
+    if (!group) return;
+
+    let groupTeamIds = group.teams || [];
+    let teamsList = allTeamsData || [];
+
+    let checkboxesHtml = teamsList.map(t => {
+        let isChecked = groupTeamIds.includes(t.id);
+        let logoHtml = t.logo
+            ? `<img src="${t.logo}" class="w-8 h-8 rounded-lg object-contain bg-white p-0.5 border border-slate-200">`
+            : `<div class="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-white" style="background-color: ${t.theme_color || '#059669'}">${escapeHtml(formatInitials(t.name))}</div>`;
+
+        return `
+            <label class="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/30 cursor-pointer transition-all">
+                <div class="flex items-center gap-3">
+                    <input type="checkbox" name="assign-team-cb" value="${t.id}" ${isChecked ? 'checked' : ''} class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500">
+                    ${logoHtml}
+                    <div>
+                        <div class="text-sm font-bold text-slate-900">${escapeHtml(t.name)}</div>
+                        <div class="text-[11px] text-slate-400 font-medium">${t.player_count || 0} players registered</div>
+                    </div>
+                </div>
+            </label>
+        `;
+    }).join("");
+
+    let html = `
+        <div class="p-5 bg-gradient-to-r from-emerald-700 to-teal-800 text-white font-bold text-base flex justify-between items-center shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-lg">👥</div>
+                <div>
+                    <div class="text-sm font-bold text-white">Assign Teams to ${escapeHtml(group.name)}</div>
+                    <div class="text-[11px] text-emerald-200 font-normal">Select which teams participate in this group</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-white/80 hover:text-white hover:bg-white/10 flex items-center justify-center text-xl cursor-pointer">&times;</button>
+        </div>
+        
+        <form onsubmit="submitAssignTeams(event)" class="p-6 bg-slate-50 flex flex-col gap-4">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-600">Available Squads (${teamsList.length})</span>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="document.querySelectorAll('input[name=assign-team-cb]').forEach(cb => cb.checked = true)" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">Select All</button>
+                    <span class="text-slate-300">•</span>
+                    <button type="button" onclick="document.querySelectorAll('input[name=assign-team-cb]').forEach(cb => cb.checked = false)" class="text-xs font-bold text-slate-500 hover:underline cursor-pointer">Clear All</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[380px] overflow-y-auto p-1 bg-slate-100 rounded-2xl border border-slate-200">
+                ${checkboxesHtml || '<div class="col-span-2 text-xs text-slate-400 text-center py-8">No teams available. Create teams in the Teams tab first.</div>'}
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-200 mt-2">
+                <button type="button" onclick="closeModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase tracking-wider cursor-pointer">Cancel</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-emerald-600/30 transition-all active:scale-98 cursor-pointer">Save Assignments</button>
+            </div>
+        </form>
+    `;
+    showModal(html, "w-[560px]");
+};
+
+window.submitAssignTeams = async function(e) {
+    e.preventDefault();
+    let checkedBoxes = document.querySelectorAll('input[name="assign-team-cb"]:checked');
+    let teamIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+    try {
+        await TournamentAPI.assignTeamsToGroup(selectedGroupId, teamIds);
+        showToast("Teams assigned successfully!");
+        closeModal();
+        await onTournamentSelected(selectedTournamentId);
+    } catch (err) {
+        console.error("Error assigning teams:", err);
+        showToast("Failed to assign teams: " + err.message, "error");
+    }
+};
+
+
+// =========================================================================
+// TOURNAMENT STATS & LEADERBOARDS
+// =========================================================================
+
+window.loadStatsView = async function() {
+    try {
+        let tourns = await TournamentAPI.getTournaments();
+        let tournSelect = document.getElementById("stats-tournament-select");
+        if (tournSelect) {
+            let curVal = tournSelect.value;
+            tournSelect.innerHTML = `<option value="">-- Select a Tournament --</option>`;
+            (tourns || []).forEach(t => {
+                let opt = document.createElement("option");
+                opt.value = t.id;
+                opt.text = `${t.name} (${t.season || 'N/A'})`;
+                tournSelect.add(opt);
+            });
+            if (curVal) tournSelect.value = curVal;
+            else if (tourns && tourns.length > 0) {
+                tournSelect.value = tourns[0].id;
+            }
+        }
+        await refreshLeaderboards();
+    } catch(e) {
+        console.error("Error loading stats view:", e);
+    }
+};
+
+window.onStatsTournamentSelected = async function(val) {
+    await refreshLeaderboards();
+};
+
+window.refreshLeaderboards = async function() {
+    let tournSelect = document.getElementById("stats-tournament-select");
+    let tournId = tournSelect ? tournSelect.value : null;
+    
+    if (!tournId) {
+        // Clear tables
+        let tbodies = ['stats-mvp', 'stats-top-scorers', 'stats-top-wickets', 'stats-highest-score', 'stats-most-6s', 'stats-most-4s', 'stats-best-figures'];
+        tbodies.forEach(id => {
+            let el = document.getElementById(id);
+            if (el) el.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-slate-400 text-xs italic">Select a tournament to view stats</td></tr>`;
+        });
+        return;
+    }
+    
+    try {
+        let res = await fetch(`${TOURNAMENT_API_BASE}/tournaments/${tournId}/leaderboards/`);
+        if (!res.ok) throw new Error("Failed to fetch leaderboards");
+        let data = await res.json();
+        
+        let fmtPlayerInfo = (p) => {
+            let img = p.image ? `<img src="${p.image}" class="w-8 h-8 rounded-lg object-cover bg-slate-100">` : `<div class="w-8 h-8 rounded-lg bg-slate-200 text-slate-600 font-bold flex items-center justify-center text-xs">${p.name.charAt(0)}</div>`;
+            return `<div class="flex items-center gap-2">
+                        ${img}
+                        <div>
+                            <div class="font-bold text-xs text-slate-900">${escapeHtml(p.name)}</div>
+                            <div class="text-[10px] text-slate-500">${escapeHtml(p.team || '')}</div>
+                        </div>
+                    </div>`;
+        };
+        
+        // MVP
+        let elMvp = document.getElementById("stats-mvp");
+        if (elMvp) {
+            elMvp.innerHTML = (data.mvp && data.mvp.length > 0) ? data.mvp.map((item, idx) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2.5 px-4 text-center font-bold text-slate-400">#${idx+1}</td>
+                    <td class="py-2.5 px-4">${fmtPlayerInfo(item.player)}</td>
+                    <td class="py-2.5 px-4 text-xs font-semibold text-slate-600">${escapeHtml(item.player.team || '')}</td>
+                    <td class="py-2.5 px-4 text-right font-black text-amber-600">${item.value} pts</td>
+                </tr>
+            `).join("") : `<tr><td colspan="4" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+        }
+
+        // Top Scorers
+        let elTopScorers = document.getElementById("stats-top-scorers");
+        if (elTopScorers) {
+            elTopScorers.innerHTML = (data.batting.top_scorers && data.batting.top_scorers.length > 0) ? data.batting.top_scorers.map((item, idx) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
+                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
+                    <td class="py-2 px-4 text-right font-black text-slate-800">${item.value}</td>
+                </tr>
+            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+        }
+
+        // Highest Score
+        let elHighestScore = document.getElementById("stats-highest-score");
+        if (elHighestScore) {
+            elHighestScore.innerHTML = (data.batting.highest_score && data.batting.highest_score.length > 0) ? data.batting.highest_score.map((item, idx) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
+                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
+                    <td class="py-2 px-4 text-right font-black text-slate-800">${item.runs}${item.not_out ? '*' : ''} <span class="text-[10px] text-slate-500 font-normal">(${item.balls})</span></td>
+                </tr>
+            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+        }
+        
+        // Most 6s
+        let elMost6s = document.getElementById("stats-most-6s");
+        if (elMost6s) {
+            elMost6s.innerHTML = (data.batting.most_6s && data.batting.most_6s.length > 0) ? data.batting.most_6s.map((item, idx) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
+                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
+                    <td class="py-2 px-4 text-right font-black text-emerald-600">${item.value}</td>
+                </tr>
+            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+        }
+
+        // Most 4s
+        let elMost4s = document.getElementById("stats-most-4s");
+        if (elMost4s) {
+            elMost4s.innerHTML = (data.batting.most_4s && data.batting.most_4s.length > 0) ? data.batting.most_4s.map((item, idx) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
+                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
+                    <td class="py-2 px-4 text-right font-black text-cyan-600">${item.value}</td>
+                </tr>
+            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+        }
+
+        // Top Wickets
+        let elTopWickets = document.getElementById("stats-top-wickets");
+        if (elTopWickets) {
+            elTopWickets.innerHTML = (data.bowling.top_wickets && data.bowling.top_wickets.length > 0) ? data.bowling.top_wickets.map((item, idx) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
+                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
+                    <td class="py-2 px-4 text-right font-black text-purple-700">${item.value}</td>
+                </tr>
+            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+        }
+
+        // Best Figures
+        let elBestFigures = document.getElementById("stats-best-figures");
+        if (elBestFigures) {
+            elBestFigures.innerHTML = (data.bowling.best_figures && data.bowling.best_figures.length > 0) ? data.bowling.best_figures.map((item, idx) => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
+                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
+                    <td class="py-2 px-4 text-right font-black text-indigo-700">${item.wickets}/${item.runs} <span class="text-[10px] text-slate-500 font-normal">(${item.overs})</span></td>
+                </tr>
+            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+        }
+
+    } catch(err) {
+        console.error("Error fetching leaderboards:", err);
+        showToast("Error loading leaderboards", "error");
+    }
+};
+
+
+
 

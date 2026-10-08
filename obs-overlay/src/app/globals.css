@@ -1,8 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@600;700&family=Outfit:wght@500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: 'Outfit', sans-serif;
+  --font-orbitron: 'Orbitron', monospace, sans-serif;
+  --font-rajdhani: 'Rajdhani', sans-serif;
 }
 
 :root {

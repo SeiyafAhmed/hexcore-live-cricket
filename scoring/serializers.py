@@ -7,7 +7,16 @@ fields, so image uploads work with multipart/form-data requests.
 
 from rest_framework import serializers
 
-from .models import Ball, BattingInnings, BowlingInnings, Match, Player, Team
+from .models import (
+    Ball,
+    BattingInnings,
+    BowlingInnings,
+    Group,
+    Match,
+    Player,
+    Team,
+    Tournament,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +95,53 @@ class PlayerStatsSerializer(serializers.Serializer):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Tournament & Group
+# ---------------------------------------------------------------------------
+
+class GroupSerializer(serializers.ModelSerializer):
+    tournament_name = serializers.CharField(source="tournament.name", read_only=True)
+    team_details = TeamSerializer(source="teams", many=True, read_only=True)
+    team_count = serializers.IntegerField(source="teams.count", read_only=True)
+
+    class Meta:
+        model = Group
+        fields = [
+            "id",
+            "tournament",
+            "tournament_name",
+            "name",
+            "teams",
+            "team_details",
+            "team_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class TournamentSerializer(serializers.ModelSerializer):
+    groups = GroupSerializer(many=True, read_only=True)
+    group_count = serializers.IntegerField(source="groups.count", read_only=True)
+    match_count = serializers.IntegerField(source="matches.count", read_only=True)
+
+    class Meta:
+        model = Tournament
+        fields = [
+            "id",
+            "name",
+            "season",
+            "max_overs",
+            "groups",
+            "group_count",
+            "match_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+# ---------------------------------------------------------------------------
 # Match
 # ---------------------------------------------------------------------------
 
@@ -96,15 +152,31 @@ class MatchSerializer(serializers.ModelSerializer):
     bowling_team_name = serializers.CharField(
         source="bowling_team.name", read_only=True
     )
+    tournament_name = serializers.CharField(
+        source="tournament.name", read_only=True
+    )
+    group_name = serializers.CharField(
+        source="group.name", read_only=True
+    )
+    winner_name = serializers.CharField(
+        source="winner.name", read_only=True
+    )
 
     class Meta:
         model = Match
         fields = [
             "id",
+            "tournament",
+            "tournament_name",
+            "group",
+            "group_name",
             "batting_team",
             "batting_team_name",
             "bowling_team",
             "bowling_team_name",
+            "winner",
+            "winner_name",
+            "result_status",
             "status",
             "current_innings_state",
             "started_at",

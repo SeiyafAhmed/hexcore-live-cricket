@@ -88,6 +88,57 @@ class Player(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Tournament & Group
+# ---------------------------------------------------------------------------
+
+class Tournament(models.Model):
+    """A cricket tournament comprising multiple groups and matches."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=150)
+    season = models.CharField(max_length=50, blank=True, default="")
+    max_overs = models.PositiveSmallIntegerField(
+        default=20,
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Default overs per innings for matches in this tournament.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.season})" if self.season else self.name
+
+
+class Group(models.Model):
+    """A tournament group or pool containing participating teams."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tournament = models.ForeignKey(
+        Tournament,
+        on_delete=models.CASCADE,
+        related_name="groups",
+    )
+    name = models.CharField(max_length=100)
+    teams = models.ManyToManyField(
+        Team,
+        related_name="groups",
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tournament", "name"]
+        unique_together = [("tournament", "name")]
+
+    def __str__(self):
+        return f"{self.tournament.name} - {self.name}"
+
+
+# ---------------------------------------------------------------------------
 # Match
 # ---------------------------------------------------------------------------
 
@@ -100,7 +151,26 @@ class Match(models.Model):
         COMPLETED = "COMPLETED", "Completed"
         ABANDONED = "ABANDONED", "Abandoned"
 
+    class ResultStatus(models.TextChoices):
+        COMPLETED = "COMPLETED", "Completed"
+        NO_RESULT = "NO_RESULT", "No Result"
+        TIED = "TIED", "Tied"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tournament = models.ForeignKey(
+        Tournament,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="matches",
+    )
+    group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="matches",
+    )
     batting_team = models.ForeignKey(
         Team,
         on_delete=models.CASCADE,
@@ -110,6 +180,20 @@ class Match(models.Model):
         Team,
         on_delete=models.CASCADE,
         related_name="matches_bowling",
+    )
+    winner = models.ForeignKey(
+        Team,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="matches_won",
+    )
+    result_status = models.CharField(
+        max_length=20,
+        choices=ResultStatus.choices,
+        default=ResultStatus.COMPLETED,
+        null=True,
+        blank=True,
     )
     status = models.CharField(
         max_length=10,

@@ -1,15 +1,106 @@
 import eel
 import copy
 import base64
+import time
+import os
+import json
+import sqlite3
 import api
-from ws_client import ws_manager
+from state_client import state_manager, ws_manager
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DB_PATH = os.path.join(PROJECT_ROOT, "db.sqlite3")
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_match.json")
 
 state = {}
 history_stack = []
 
+def save_persisted_state():
+    global state, history_stack
+    if not state or not state.get("team_1_name"):
+        return
+    try:
+        data = {
+            "state": state,
+            "history_stack": history_stack[-25:] if history_stack else []
+        }
+        temp_file = STATE_FILE + ".tmp"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(temp_file, STATE_FILE)
+    except Exception as e:
+        print(f"[save_persisted_state] Error saving state: {e}", flush=True)
+
+def clear_persisted_state():
+    global state, history_stack
+    state = {}
+    history_stack = []
+    if os.path.exists(STATE_FILE):
+        try:
+            os.remove(STATE_FILE)
+        except Exception as e:
+            print(f"[clear_persisted_state] Error removing {STATE_FILE}: {e}", flush=True)
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH)
+            try:
+                cur = conn.cursor()
+                cur.execute("UPDATE scoring_match SET status = 'COMPLETED' WHERE status = 'LIVE'")
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception as ex:
+        print(f"[clear_persisted_state] SQLite update error: {ex}", flush=True)
+
+def load_persisted_state():
+    global state, history_stack
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                loaded_state = data.get("state") if ("state" in data and isinstance(data["state"], dict)) else data
+                if isinstance(loaded_state, dict) and loaded_state.get("team_1_name"):
+                    state = loaded_state
+                    history_stack = data.get("history_stack", []) if "history_stack" in data else []
+                    print(f"[load_persisted_state] Restored active match from {STATE_FILE} (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)})", flush=True)
+                    return True
+        except Exception as e:
+            print(f"[load_persisted_state] Error loading {STATE_FILE}: {e}", flush=True)
+
+    # Fallback to SQLite DB for LIVE match
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT current_innings_state FROM scoring_match WHERE status = 'LIVE' ORDER BY updated_at DESC LIMIT 1")
+                row = cur.fetchone()
+                if row and row[0]:
+                    raw_val = row[0]
+                    loaded = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
+                    if isinstance(loaded, dict) and loaded.get("team_1_name"):
+                        state = loaded
+                        history_stack = []
+                        print(f"[load_persisted_state] Restored LIVE match from SQLite (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)})", flush=True)
+                        save_persisted_state()
+                        return True
+            finally:
+                conn.close()
+    except Exception as ex:
+        print(f"[load_persisted_state] SQLite fallback error: {ex}", flush=True)
+
+    return False
+
+# Attempt restoring state on startup
+load_persisted_state()
+if state:
+    ws_manager.send_state(state)
+
 def save_state_for_undo():
     global state, history_stack
     history_stack.append(copy.deepcopy(state))
+    save_persisted_state()
 
 def swap_batsmen():
     global state
@@ -91,6 +182,8 @@ def end_first_innings():
     state["striker"] = None
     state["non_striker"] = None
     state["bowler"] = None
+    state["ball_speed"] = None
+    state["last_event"] = None
     
     state["innings"] = 2
     state["target"] = target
@@ -103,6 +196,9 @@ def end_first_innings():
     state["batting_team_id"] = bid2
     state["bowling_team_id"] = bid1
     
+    sync_active_stats()
+    save_persisted_state()
+    ws_manager.send_state(state)
     eel.showInnings2SetupPrompt(target)
 
 @eel.expose
@@ -116,11 +212,53 @@ def start_innings_2(striker, non_striker, bowler):
     state["batsmen_stats"][non_striker] = state["non_striker"].copy()
     state.setdefault("bowler_stats", {})[bowler] = state["bowler"].copy()
     
+    bat_id = state.get("batting_team_id")
+    bowl_id = state.get("bowling_team_id")
+    try:
+        teams = api.get_teams()
+        for t in teams:
+            tid = str(t.get("id")).replace("-", "")
+            if tid == str(bat_id).replace("-", ""):
+                state["batting_team_name"] = t.get("name")
+                state["batting_team_color"] = t.get("theme_color") or "#ff007f"
+                state["theme_color"] = state["batting_team_color"]
+                state["batting_team_logo"] = t.get("logo")
+            elif tid == str(bowl_id).replace("-", ""):
+                state["bowling_team_name"] = t.get("name")
+                state["bowling_team_color"] = t.get("theme_color") or "#dc2626"
+                state["bowling_team_logo"] = t.get("logo")
+    except Exception as e:
+        print("[start_innings_2] Team lookup error:", e)
+
     sync_active_stats()
     ws_manager.send_state(state)
 
 def end_match():
+    global state
     state["match_over"] = True
+
+    # Compute match outcome and winner
+    r1 = 0
+    w1_id = None
+    if "innings_1_stats" in state and isinstance(state["innings_1_stats"], dict):
+        r1 = int(state["innings_1_stats"].get("runs", 0))
+        w1_id = state["innings_1_stats"].get("batting_team_id")
+    r2 = int(state.get("runs", 0))
+    w2_id = state.get("batting_team_id")
+
+    if r1 > r2:
+        state["winner_id"] = w1_id
+        state["result_status"] = "COMPLETED"
+    elif r2 > r1:
+        state["winner_id"] = w2_id
+        state["result_status"] = "COMPLETED"
+    else:
+        state["winner_id"] = None
+        state["result_status"] = "TIED"
+
+    sync_active_stats()
+    save_persisted_state()
+    ws_manager.send_state(state)
     eel.showMatchOverPrompt()
 
 def _decode_base64_file(data_uri):
@@ -179,11 +317,53 @@ def assign_player_to_team(player_id, team_id):
     return api.assign_player_to_team(player_id, team_id)
 
 @eel.expose
+def get_tournaments():
+    return api.get_tournaments()
+
+@eel.expose
+def create_tournament(name, season="", max_overs=20):
+    return api.create_tournament(name, season, max_overs)
+
+@eel.expose
+def update_tournament(tournament_id, name, season="", max_overs=20):
+    return api.update_tournament(tournament_id, name, season, max_overs)
+
+@eel.expose
+def delete_tournament(tournament_id):
+    return api.delete_tournament(tournament_id)
+
+@eel.expose
+def get_groups(tournament_id=None):
+    if tournament_id in ("", "all", "null", "None"):
+        tournament_id = None
+    return api.get_groups(tournament_id)
+
+@eel.expose
+def create_group(tournament_id, name, team_ids=None):
+    return api.create_group(tournament_id, name, team_ids)
+
+@eel.expose
+def update_group(group_id, name):
+    return api.update_group(group_id, name)
+
+@eel.expose
+def delete_group(group_id):
+    return api.delete_group(group_id)
+
+@eel.expose
+def assign_teams_to_group(group_id, team_ids):
+    return api.assign_teams_to_group(group_id, team_ids)
+
+@eel.expose
+def get_group_standings(group_id):
+    return api.get_group_standings(group_id)
+
+@eel.expose
 def console_log(msg):
     print("JS LOG:", msg, flush=True)
 
 @eel.expose
-def start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, overs):
+def start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, overs, tournament_id=None, group_id=None):
     global state, history_stack
     history_stack = []
     
@@ -193,6 +373,8 @@ def start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, o
         "max_overs": int(overs),
         "max_wickets": 10,
         "balls_per_over": 6,
+        "tournament_id": tournament_id if tournament_id and tournament_id not in ("", "null", "None") else None,
+        "group_id": group_id if group_id and group_id not in ("", "null", "None") else None,
         "team_1_name": batName,
         "team_2_name": bowlName,
         "batting_team_id": batId,
@@ -206,13 +388,39 @@ def start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, o
         "batsmen_stats": {},
         "bowler_stats": {},
         "extras": {"wd": 0, "nb": 0, "b": 0, "lb": 0},
-        "bowling_team_id": bowlId
+        "bowling_team_id": bowlId,
+        "ball_speed": None,
+        "last_event": None
     }
     
     state["batsmen_stats"][striker] = state["striker"].copy()
     state["batsmen_stats"][nonstriker] = state["non_striker"].copy()
     state["bowler_stats"][bowler] = state["bowler"].copy()
     
+    state["batting_team_name"] = batName
+    state["bowling_team_name"] = bowlName
+    state["batting_team_color"] = "#ff007f"
+    state["bowling_team_color"] = "#dc2626"
+    state["batting_team_logo"] = None
+    state["bowling_team_logo"] = None
+
+    try:
+        teams = api.get_teams()
+        for t in teams:
+            tid = str(t.get("id")).replace("-", "")
+            raw_bat = str(batId).replace("-", "")
+            raw_bowl = str(bowlId).replace("-", "")
+            if tid == raw_bat or str(t.get("name")) == str(batName):
+                state["batting_team_color"] = t.get("theme_color") or "#ff007f"
+                state["theme_color"] = state["batting_team_color"]
+                state["batting_team_logo"] = t.get("logo")
+            elif tid == raw_bowl or str(t.get("name")) == str(bowlName):
+                state["bowling_team_color"] = t.get("theme_color") or "#dc2626"
+                state["bowling_team_logo"] = t.get("logo")
+    except Exception as e:
+        print("[start_match] Team lookup error:", e)
+
+    sync_active_stats()
     ws_manager.send_state(state)
 
 def sync_active_stats():
@@ -223,12 +431,21 @@ def sync_active_stats():
         state["bowler_stats"][state["bowler"]["name"]] = state["bowler"].copy()
     if state.get("striker") and state.get("non_striker"):
         state["current_batters"] = [state["striker"]["name"], state["non_striker"]["name"]]
+    save_persisted_state()
 
 @eel.expose
 def get_state():
     global state
+    if not state or not state.get("team_1_name"):
+        load_persisted_state()
     sync_active_stats()
     return copy.deepcopy(state)
+
+@eel.expose
+def reset_match():
+    clear_persisted_state()
+    ws_manager.send_state({})
+    return True
 
 @eel.expose
 def undo():
@@ -236,7 +453,9 @@ def undo():
     if not history_stack:
         return
     state = history_stack.pop()
+    state["last_event"] = None
     sync_active_stats()
+    save_persisted_state()
     ws_manager.send_state(state)
 
 @eel.expose
@@ -250,6 +469,21 @@ def set_new_bowler(name):
     
     sync_active_stats()
     ws_manager.send_state(state)
+
+@eel.expose
+def set_ball_speed(speed):
+    global state
+    if not state:
+        return None
+    if speed is None or str(speed).strip() == "" or str(speed).strip().lower() in ("null", "none"):
+        state["ball_speed"] = None
+        state["ball_speed_time"] = None
+    else:
+        state["ball_speed"] = str(speed).strip()
+        state["ball_speed_time"] = time.time()
+    sync_active_stats()
+    ws_manager.send_state(state)
+    return state.get("ball_speed")
 
 @eel.expose
 def process_delivery(label, team_runs, bat_runs, bowl_runs, valid_ball, physical_runs, is_wide):
@@ -269,6 +503,28 @@ def process_delivery(label, team_runs, bat_runs, bowl_runs, valid_ball, physical
     
     if not is_wide:
         state["striker"]["balls"] += 1
+        
+    # Boundary animation should only play when player hit (bat_runs is 4 or 6), never for byes/leg byes/wides
+    if bat_runs == 4:
+        state["last_event"] = {
+            "id": f"four-{int(time.time() * 1000)}",
+            "type": "FOUR",
+            "title": "BOUNDARY FOUR!",
+            "subtitle": "CRACKING SHOT TO THE FENCE",
+            "player": state["striker"]["name"],
+            "scoreInfo": f"{state['striker']['runs']} ({state['striker']['balls']})",
+        }
+    elif bat_runs == 6:
+        state["last_event"] = {
+            "id": f"six-{int(time.time() * 1000)}",
+            "type": "SIX",
+            "title": "MAXIMUM SIX!",
+            "subtitle": "CLEAN HIT INTO THE STANDS",
+            "player": state["striker"]["name"],
+            "scoreInfo": f"{state['striker']['runs']} ({state['striker']['balls']})",
+        }
+    else:
+        state["last_event"] = None
         
     for k in ["wd", "nb", "b", "lb"]:
         state.setdefault("extras", {}).setdefault(k, 0)
@@ -419,20 +675,54 @@ def score_wicket(method, new_bat_name, physical_runs=0, illegal_delivery="None",
         
     if out_batsman_type == "Non-Striker":
         out_batsman = state["non_striker"]["name"]
+        out_stats = copy.deepcopy(state["non_striker"])
+        out_stats["status"] = status
         state.setdefault("out_batsmen", []).append(out_batsman)
         state["non_striker"]["status"] = status
-        state.setdefault("batsmen_stats", {})[out_batsman] = state["non_striker"].copy()
+        state.setdefault("batsmen_stats", {})[out_batsman] = out_stats.copy()
         
         state["non_striker"] = {"name": new_bat_name, "runs": 0, "balls": 0, "4s": 0, "6s": 0, "status": "not out"}
         state["batsmen_stats"][new_bat_name] = state["non_striker"].copy()
     else:
         out_batsman = state["striker"]["name"]
+        out_stats = copy.deepcopy(state["striker"])
+        out_stats["status"] = status
         state.setdefault("out_batsmen", []).append(out_batsman)
         state["striker"]["status"] = status
-        state.setdefault("batsmen_stats", {})[out_batsman] = state["striker"].copy()
+        state.setdefault("batsmen_stats", {})[out_batsman] = out_stats.copy()
         
         state["striker"] = {"name": new_bat_name, "runs": 0, "balls": 0, "4s": 0, "6s": 0, "status": "not out"}
         state["batsmen_stats"][new_bat_name] = state["striker"].copy()
+    
+    p_runs = int(out_stats.get("runs", 0))
+    p_balls = int(out_stats.get("balls", 0))
+    p_fours = int(out_stats.get("4s", 0))
+    p_sixes = int(out_stats.get("6s", 0))
+    p_sr = round((p_runs / p_balls) * 100, 1) if p_balls > 0 else 0.0
+
+    card_info = {
+        "playerName": out_batsman,
+        "runs": p_runs,
+        "balls": p_balls,
+        "fours": p_fours,
+        "sixes": p_sixes,
+        "strikeRate": p_sr,
+        "methodOfOut": status,
+        "teamName": state.get("batting_team_name"),
+        "teamColor": state.get("batting_team_color") or state.get("theme_color"),
+    }
+
+    state["last_wicket"] = card_info
+    state["last_event"] = {
+        "id": f"wkt-{int(time.time() * 1000)}",
+        "type": "WICKET",
+        "title": "WICKET FALLEN",
+        "subtitle": f"b {bowler_name}" if bowler_name and method != "Run Out" else (status or "OUT!"),
+        "player": out_batsman,
+        "scoreInfo": f"{state['runs']} / {state['wickets']}",
+        "dismissal": status,
+        "wicket_card": card_info,
+    }
     
     if valid_ball:
         state["balls_this_over"] += 1
@@ -494,6 +784,7 @@ def award_penalty_runs(team_name):
     is_batting = (team_name == batting_team)
     
     state.setdefault("extras", {}).setdefault("pen", 0)
+    state["last_event"] = None
     
     if is_batting:
         state["runs"] += 5

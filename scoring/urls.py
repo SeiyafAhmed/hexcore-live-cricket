@@ -10,6 +10,8 @@ from rest_framework.routers import DefaultRouter
 from . import views
 
 router = DefaultRouter()
+router.register(r"tournaments", views.TournamentViewSet, basename="tournament")
+router.register(r"groups", views.GroupViewSet, basename="group")
 router.register(r"teams", views.TeamViewSet, basename="team")
 router.register(r"players", views.PlayerViewSet, basename="player")
 router.register(r"matches", views.MatchViewSet, basename="match")
@@ -18,5 +20,7 @@ router.register(r"bowling-innings", views.BowlingInningsViewSet, basename="bowli
 router.register(r"balls", views.BallViewSet, basename="ball")
 
 urlpatterns = [
+    path("stream/", views.stream_match_state, name="stream_match_state"),
+    path("match-state/", views.match_state_api, name="match_state_api"),
     path("", include(router.urls)),
 ]

@@ -25,13 +25,12 @@ SECRET_KEY = 'django-insecure-643@-5#c6@q+s8umo9ijhb+#w93yn_2e(-sq5=b@lyr%j%)e@h
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -39,13 +38,14 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     # Third-party
+    'corsheaders',
     'rest_framework',
-    'channels',
     # Local
     'scoring',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -73,14 +73,10 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'cricket_backend.wsgi.application'
-ASGI_APPLICATION = 'cricket_backend.asgi.application'
 
-# Channels configuration (InMemory for local testing without Redis)
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    }
-}
+# CORS configuration for SSE streaming to Next.js and Eel clients
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
 
 
 # Database
