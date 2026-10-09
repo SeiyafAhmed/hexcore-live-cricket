@@ -41,6 +41,15 @@
             opacity: 0.85;
             box-shadow: none;
         }
+
+        @keyframes modalShakeAnim {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-8px); }
+            40%, 80% { transform: translateX(8px); }
+        }
+        .animate-modal-shake {
+            animation: modalShakeAnim 0.35s ease-in-out !important;
+        }
         
         /* Modern Scrollbars */
         ::-webkit-scrollbar {

@@ -1301,6 +1301,17 @@ async function refreshUI() {
     // Auto-show match summary if match is over
     if (state.match_over) {
         showMatchOverPrompt();
+    } else {
+        let isAwaitingBowler = Boolean(state.needs_new_bowler) || (
+            (state.balls_this_over === 0) &&
+            ((state.overs_completed || 0) > 0) &&
+            Boolean(state.bowler) &&
+            Boolean(state.previous_bowler) &&
+            (state.bowler.name === state.previous_bowler)
+        );
+        if (isAwaitingBowler && !document.getElementById("new-bowler-select")) {
+            showNewOverPrompt(state.previous_bowler);
+        }
     }
 }
 
@@ -1318,38 +1329,86 @@ async function _doShowNewOverPrompt(prevBowler) {
         let cleanBowlId = String(state.bowling_team_id).replace(/-/g, "").toLowerCase();
         bowlPlayers = bowlPlayers.filter(p => p && p.team && String(p.team).replace(/-/g, "").toLowerCase() === cleanBowlId);
     }
+    if (state.bowling_team_id && bowlPlayers.length === 0) {
+        try {
+            let res = await eel.get_players(state.bowling_team_id)();
+            if (Array.isArray(res)) bowlPlayers = res;
+        } catch (e) {
+            console.warn("Could not fetch bowling players:", e);
+        }
+    }
     
+    let effectivePrevBowler = prevBowler || (state.previous_bowler || (state.past_overs && state.past_overs.length > 0 ? state.past_overs[state.past_overs.length - 1].bowler : ""));
+
     let options = bowlPlayers
         .map(p => (p.full_name || (p.first_name ? (p.first_name + " " + (p.last_name || "")) : "")).trim())
-        .filter(name => name && name !== prevBowler)
-        .map(name => `<option value="${name}">${name}</option>`)
+        .filter(name => name && name !== effectivePrevBowler)
+        .map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
         .join("");
 
+    let bowlingTeamName = state.bowling_team_name || (state.innings === 1 ? state.team_2_name : state.team_1_name) || "Bowling Team";
+    let overNumber = state.overs_completed || 0;
+
     let html = `
-        <div class="p-4 bg-blue-600 text-white font-bold text-lg">End of Over!</div>
-        <div class="p-6 flex flex-col gap-4">
-            <div>
-                <label class="block font-bold mb-1">Select New Bowler</label>
-                <select id="new-bowler-select" class="border p-2 w-full">
-                    ${options || '<option value="Unknown Bowler">Unknown Bowler</option>'}
-                </select>
-                <div class="text-sm text-gray-500 mt-1">Cannot bowl two consecutive overs. Previous bowler: ${prevBowler}</div>
+        <div class="p-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-extrabold text-base flex items-center justify-between shadow-sm">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-lg">
+                    🎯
+                </div>
+                <div>
+                    <div class="text-base font-black tracking-tight leading-tight">End of Over ${overNumber}!</div>
+                    <div class="text-[11px] text-blue-100 font-medium">${escapeHtml(bowlingTeamName)} • Select new bowler</div>
+                </div>
             </div>
-            <div class="flex justify-end gap-2 mt-4">
-                <button onclick="submitNewBowler()" class="px-4 py-2 bg-blue-600 text-white rounded font-bold">Confirm</button>
+        </div>
+        <div class="p-6 flex flex-col gap-4 bg-white">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">Select New Bowler</label>
+                <select id="new-bowler-select" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 hover:bg-white font-semibold text-slate-800 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-xs transition-all">
+                    ${options || '<option value="New Bowler">New Bowler</option>'}
+                </select>
+                <div class="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200/80 rounded-xl p-3 mt-3 font-medium">
+                    <span class="text-base">⚠️</span>
+                    <span>Cannot bowl two consecutive overs. Previous bowler: <strong class="font-bold text-amber-950">${escapeHtml(effectivePrevBowler || 'None')}</strong></span>
+                </div>
+            </div>
+            <div class="flex items-center justify-between gap-3 mt-2 pt-3 border-t border-slate-100">
+                <button type="button" onclick="undoLastBallFromOverPrompt()" class="px-3.5 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-200 active:scale-95" title="Undo the delivery that completed this over">
+                    <span>↩</span> Undo Last Ball
+                </button>
+                <button type="button" onclick="submitNewBowler()" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-2">
+                    <span>Confirm Bowler</span>
+                    <span>→</span>
+                </button>
             </div>
         </div>
     `;
-    showModal(html);
+    showModal(html, "w-[440px]", false);
 }
 
+window.undoLastBallFromOverPrompt = async function() {
+    closeModal();
+    await eel.undo()();
+    refreshUI();
+};
+
 window.submitNewBowler = async function() {
-    let name = document.getElementById("new-bowler-select").value;
-    if (!name) name = "New Bowler";
+    let sel = document.getElementById("new-bowler-select");
+    let name = sel ? sel.value : "";
+    if (!name || name.trim() === "") name = "New Bowler";
+
+    let state = window.currentMatchState || (await eel.get_state()());
+    let prev = state ? state.previous_bowler : "";
+    if (prev && name === prev) {
+        alert(`Cannot select ${name}. A bowler cannot bowl two consecutive overs!`);
+        shakeModal();
+        return;
+    }
+
     await eel.set_new_bowler(name)();
     closeModal();
     refreshUI();
-}
+};
 
 eel.expose(showInnings2SetupPrompt);
 function showInnings2SetupPrompt(target) {
@@ -1424,7 +1483,7 @@ async function _doShowInnings2Setup(target) {
             </div>
         </div>
     `;
-    showModal(html, "w-[520px]");
+    showModal(html, "w-[520px]", false);
 }
 
 window.submitInnings2Setup = async function() {
@@ -2057,7 +2116,25 @@ window.confirmResetCurrentMatch = function() {
     showModal(html, "w-[440px]");
 };
 
+window.isAwaitingNewBowler = function() {
+    let state = window.currentMatchState;
+    if (!state || state.match_over) return false;
+    return Boolean(state.needs_new_bowler) || (
+        (state.balls_this_over === 0) &&
+        ((state.overs_completed || 0) > 0) &&
+        Boolean(state.bowler) &&
+        Boolean(state.previous_bowler) &&
+        (state.bowler.name === state.previous_bowler)
+    );
+};
+
 async function scoreBall(runs) {
+    if (window.isAwaitingNewBowler()) {
+        let state = window.currentMatchState;
+        showNewOverPrompt(state ? state.previous_bowler : "");
+        shakeModal();
+        return;
+    }
     await eel.process_delivery(runs.toString(), parseInt(runs), parseInt(runs), parseInt(runs), true, parseInt(runs), false)();
     refreshUI();
 }
@@ -2123,21 +2200,51 @@ async function swapStriker() {
 }
 window.swapStriker = swapStriker;
 
-function showModal(html, widthClass = "w-[420px]") {
+function showModal(html, widthClass = "w-[420px]", dismissible = true) {
     let container = document.getElementById("modal-container");
+    let backdropHandler = dismissible ? "if(event.target === this) closeModal()" : "if(event.target === this) shakeModal()";
     container.innerHTML = `
-        <div class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onclick="if(event.target === this) closeModal()">
-            <div class="bg-white text-slate-900 rounded-2xl shadow-2xl ${widthClass} max-w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200/80">
+        <div id="active-modal-backdrop" data-dismissible="${dismissible ? 'true' : 'false'}" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onclick="${backdropHandler}">
+            <div id="active-modal-dialog" class="bg-white text-slate-900 rounded-2xl shadow-2xl ${widthClass} max-w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200/80 transition-transform">
                 ${html}
             </div>
         </div>
     `;
 }
+
 function closeModal() {
-    document.getElementById("modal-container").innerHTML = "";
+    let container = document.getElementById("modal-container");
+    if (container) container.innerHTML = "";
 }
 
+window.shakeModal = function() {
+    let dialog = document.getElementById("active-modal-dialog");
+    if (!dialog) return;
+    dialog.classList.remove("animate-modal-shake");
+    void dialog.offsetWidth; // Force CSS reflow
+    dialog.classList.add("animate-modal-shake");
+};
+
+document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+        let backdrop = document.getElementById("active-modal-backdrop");
+        if (backdrop) {
+            if (backdrop.getAttribute("data-dismissible") === "false") {
+                shakeModal();
+            } else {
+                closeModal();
+            }
+        }
+    }
+});
+
 async function scoreWicket() {
+    if (window.isAwaitingNewBowler && window.isAwaitingNewBowler()) {
+        let state = window.currentMatchState;
+        showNewOverPrompt(state ? state.previous_bowler : "");
+        shakeModal();
+        return;
+    }
     let state = await eel.get_state()();
     let strikerName = state.striker ? state.striker.name : "Striker";
     let nonStrikerName = state.non_striker ? state.non_striker.name : "Non-Striker";
@@ -2324,6 +2431,12 @@ window.submitExtraDirect = async function(type, runs, runType) {
 }
 
 async function scoreExtra(type) {
+    if (window.isAwaitingNewBowler && window.isAwaitingNewBowler()) {
+        let state = window.currentMatchState;
+        showNewOverPrompt(state ? state.previous_bowler : "");
+        shakeModal();
+        return;
+    }
     if (type === '5789' || type === '5678') {
         show5789Modal();
         return;
@@ -2406,6 +2519,12 @@ async function scoreExtra(type) {
 // =========================================================================
 
 window.show5789Modal = function() {
+    if (window.isAwaitingNewBowler && window.isAwaitingNewBowler()) {
+        let state = window.currentMatchState;
+        showNewOverPrompt(state ? state.previous_bowler : "");
+        shakeModal();
+        return;
+    }
     let runs = [5, 7, 8, 9, 10];
     let buttonsHtml = runs.map(r => {
         let isOdd = (r % 2 !== 0);

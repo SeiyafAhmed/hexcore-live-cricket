@@ -55,11 +55,26 @@ def overs_to_decimal(overs_val: Any) -> float:
             return 0.0
 
 
+def format_cricket_overs(dec_overs: float) -> str:
+    """
+    Converts decimal overs (e.g. 1.5, 6.0) to standard cricket display notation (e.g. '1.3', '6').
+    """
+    if dec_overs <= 0:
+        return "0"
+    total_balls = round(dec_overs * 6)
+    completed_overs = total_balls // 6
+    remaining_balls = total_balls % 6
+    if remaining_balls == 0:
+        return f"{completed_overs}"
+    return f"{completed_overs}.{remaining_balls}"
+
+
 def _extract_match_innings(match: Match) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Extracts innings 1 and innings 2 data from a Match instance.
     Returns (innings_1_info, innings_2_info) where each is a dict with keys:
-        'team_id', 'runs', 'wickets', 'overs_decimal', 'is_all_out'
+        'team_id', 'team_name', 'bowling_team_id', 'bowling_team_name',
+        'runs', 'wickets', 'overs_decimal', 'is_all_out'
     """
     state = match.current_innings_state or {}
     max_overs = 20
@@ -76,7 +91,11 @@ def _extract_match_innings(match: Match) -> tuple[Optional[Dict[str, Any]], Opti
     # Case 1: Match state has innings_1_stats and current innings state
     if "innings_1_stats" in state and isinstance(state["innings_1_stats"], dict):
         s1 = state["innings_1_stats"]
-        t1_id = s1.get("batting_team_id") or (str(match.batting_team_id) if match.batting_team_id else None)
+        t1_id = s1.get("batting_team_id") or state.get("bowling_team_id") or (str(match.bowling_team_id) if match.bowling_team_id else (str(match.batting_team_id) if match.batting_team_id else None))
+        t1_name = s1.get("batting_team_name") or state.get("team_1_name")
+        t1_bowl_id = s1.get("bowling_team_id") or state.get("batting_team_id") or (str(match.batting_team_id) if match.batting_team_id else None)
+        t1_bowl_name = s1.get("bowling_team_name") or state.get("team_2_name")
+
         r1 = int(s1.get("runs", 0))
         w1 = int(s1.get("wickets", 0))
         ov_comp1 = int(s1.get("overs_completed", 0))
@@ -86,6 +105,9 @@ def _extract_match_innings(match: Match) -> tuple[Optional[Dict[str, Any]], Opti
 
         inn1 = {
             "team_id": str(t1_id) if t1_id else None,
+            "team_name": t1_name,
+            "bowling_team_id": str(t1_bowl_id) if t1_bowl_id else None,
+            "bowling_team_name": t1_bowl_name,
             "runs": r1,
             "wickets": w1,
             "overs_decimal": dec1,
@@ -93,7 +115,11 @@ def _extract_match_innings(match: Match) -> tuple[Optional[Dict[str, Any]], Opti
         }
 
         # Innings 2 from top-level state
-        t2_id = state.get("batting_team_id") or (str(match.bowling_team_id) if match.bowling_team_id else None)
+        t2_id = state.get("batting_team_id") or s1.get("bowling_team_id") or (str(match.batting_team_id) if match.batting_team_id else None)
+        t2_name = state.get("batting_team_name") or state.get("team_2_name")
+        t2_bowl_id = state.get("bowling_team_id") or s1.get("batting_team_id") or (str(match.bowling_team_id) if match.bowling_team_id else None)
+        t2_bowl_name = state.get("bowling_team_name") or state.get("team_1_name")
+
         r2 = int(state.get("runs", 0))
         w2 = int(state.get("wickets", 0))
         ov_comp2 = int(state.get("overs_completed", 0))
@@ -103,6 +129,9 @@ def _extract_match_innings(match: Match) -> tuple[Optional[Dict[str, Any]], Opti
 
         inn2 = {
             "team_id": str(t2_id) if t2_id else None,
+            "team_name": t2_name,
+            "bowling_team_id": str(t2_bowl_id) if t2_bowl_id else None,
+            "bowling_team_name": t2_bowl_name,
             "runs": r2,
             "wickets": w2,
             "overs_decimal": dec2,
@@ -114,26 +143,34 @@ def _extract_match_innings(match: Match) -> tuple[Optional[Dict[str, Any]], Opti
         s1 = state.get("innings1") or state.get("innings_1") or {}
         s2 = state.get("innings2") or state.get("innings_2") or {}
 
-        t1_id = s1.get("team_id") or (str(match.batting_team_id) if match.batting_team_id else None)
+        t1_id = s1.get("team_id") or s1.get("batting_team_id") or (str(match.batting_team_id) if match.batting_team_id else None)
+        t1_name = s1.get("team_name") or s1.get("batting_team_name")
         r1 = int(s1.get("runs", 0))
         w1 = int(s1.get("wickets", 0))
         dec1 = overs_to_decimal(s1.get("overs", 0))
 
+        t2_id = s2.get("team_id") or s2.get("batting_team_id") or (str(match.bowling_team_id) if match.bowling_team_id else None)
+        t2_name = s2.get("team_name") or s2.get("batting_team_name")
+        r2 = int(s2.get("runs", 0))
+        w2 = int(s2.get("wickets", 0))
+        dec2 = overs_to_decimal(s2.get("overs", 0))
+
         inn1 = {
             "team_id": str(t1_id) if t1_id else None,
+            "team_name": t1_name,
+            "bowling_team_id": str(t2_id) if t2_id else None,
+            "bowling_team_name": t2_name,
             "runs": r1,
             "wickets": w1,
             "overs_decimal": dec1,
             "is_all_out": (w1 >= max_wickets),
         }
 
-        t2_id = s2.get("team_id") or (str(match.bowling_team_id) if match.bowling_team_id else None)
-        r2 = int(s2.get("runs", 0))
-        w2 = int(s2.get("wickets", 0))
-        dec2 = overs_to_decimal(s2.get("overs", 0))
-
         inn2 = {
             "team_id": str(t2_id) if t2_id else None,
+            "team_name": t2_name,
+            "bowling_team_id": str(t1_id) if t1_id else None,
+            "bowling_team_name": t1_name,
             "runs": r2,
             "wickets": w2,
             "overs_decimal": dec2,
@@ -142,28 +179,42 @@ def _extract_match_innings(match: Match) -> tuple[Optional[Dict[str, Any]], Opti
 
     # Case 3: Fallback using BattingInnings / BowlingInnings relations
     elif match.batting_innings.exists():
-        bat_inn1 = match.batting_innings.filter(innings_number=1)
+        bat_inn1 = match.batting_innings.filter(innings_number=1).select_related("player__team")
+        first_bat = bat_inn1.first()
+        t1_id = str(first_bat.player.team_id) if (first_bat and first_bat.player and first_bat.player.team_id) else (str(match.batting_team_id) if match.batting_team_id else None)
+        t1_name = first_bat.player.team.name if (first_bat and first_bat.player and first_bat.player.team) else None
+
         r1 = sum(b.runs_scored for b in bat_inn1)
         w1 = bat_inn1.exclude(dismissal="NOT_OUT").count()
         bowl_inn1 = match.bowling_innings.filter(innings_number=1)
         dec1 = sum(overs_to_decimal(b.overs_bowled) for b in bowl_inn1)
 
+        bat_inn2 = match.batting_innings.filter(innings_number=2).select_related("player__team")
+        second_bat = bat_inn2.first()
+        t2_id = str(second_bat.player.team_id) if (second_bat and second_bat.player and second_bat.player.team_id) else (str(match.bowling_team_id) if match.bowling_team_id else None)
+        t2_name = second_bat.player.team.name if (second_bat and second_bat.player and second_bat.player.team) else None
+
+        r2 = sum(b.runs_scored for b in bat_inn2)
+        w2 = bat_inn2.exclude(dismissal="NOT_OUT").count()
+        bowl_inn2 = match.bowling_innings.filter(innings_number=2)
+        dec2 = sum(overs_to_decimal(b.overs_bowled) for b in bowl_inn2)
+
         inn1 = {
-            "team_id": str(match.batting_team_id) if match.batting_team_id else None,
+            "team_id": t1_id,
+            "team_name": t1_name,
+            "bowling_team_id": t2_id,
+            "bowling_team_name": t2_name,
             "runs": r1,
             "wickets": w1,
             "overs_decimal": dec1,
             "is_all_out": (w1 >= max_wickets),
         }
 
-        bat_inn2 = match.batting_innings.filter(innings_number=2)
-        r2 = sum(b.runs_scored for b in bat_inn2)
-        w2 = bat_inn2.exclude(dismissal="NOT_OUT").count()
-        bowl_inn2 = match.bowling_innings.filter(innings_number=2)
-        dec2 = sum(overs_to_decimal(b.overs_bowled) for b in bowl_inn2)
-
         inn2 = {
-            "team_id": str(match.bowling_team_id) if match.bowling_team_id else None,
+            "team_id": t2_id,
+            "team_name": t2_name,
+            "bowling_team_id": t1_id,
+            "bowling_team_name": t1_name,
             "runs": r2,
             "wickets": w2,
             "overs_decimal": dec2,
@@ -225,7 +276,23 @@ def calculate_group_standings(group_id: Any) -> List[Dict[str, Any]]:
             "overs_bowled": 0.0,
             "nrr": 0.0,
             "nrr_formatted": "0.000",
+            "overs_faced_display": "0",
+            "overs_bowled_display": "0",
         }
+
+    def find_team_stat(team_id: Any = None, team_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        if team_id:
+            raw_id = str(team_id).strip()
+            clean_id = raw_id.replace("-", "").lower()
+            for key, val in stats_by_team.items():
+                if key == raw_id or key.replace("-", "").lower() == clean_id:
+                    return val
+        if team_name:
+            tname_norm = str(team_name).strip().lower()
+            for val in stats_by_team.values():
+                if val.get("team_name", "").strip().lower() == tname_norm:
+                    return val
+        return None
 
     # Fetch completed matches associated with this group
     matches = Match.objects.filter(
@@ -236,6 +303,14 @@ def calculate_group_standings(group_id: Any) -> List[Dict[str, Any]]:
     ).select_related("batting_team", "bowling_team", "winner").distinct()
 
     for match in matches:
+        state = match.current_innings_state or {}
+        inn1, inn2 = _extract_match_innings(match)
+
+        # Skip live in-progress matches that haven't concluded both innings or been marked finished
+        if match.status == Match.Status.LIVE and not state.get("match_over") and not match.winner_id:
+            if not (inn1 and inn2):
+                continue
+
         team1_id = str(match.batting_team_id) if match.batting_team_id else None
         team2_id = str(match.bowling_team_id) if match.bowling_team_id else None
 
@@ -243,31 +318,12 @@ def calculate_group_standings(group_id: Any) -> List[Dict[str, Any]]:
         if not team1_id or not team2_id:
             continue
 
-        # If team is not yet in group stats dictionary, register it dynamically
-        for tid, tname in [(team1_id, match.batting_team.name), (team2_id, match.bowling_team.name)]:
-            if tid not in stats_by_team:
-                t_obj = match.batting_team if tid == team1_id else match.bowling_team
-                stats_by_team[tid] = {
-                    "team_id": tid,
-                    "team_name": tname,
-                    "team_logo": t_obj.logo.url if t_obj.logo else None,
-                    "team_color": t_obj.theme_color or "#0f547c",
-                    "played": 0,
-                    "won": 0,
-                    "lost": 0,
-                    "tied": 0,
-                    "no_result": 0,
-                    "points": 0,
-                    "runs_scored": 0,
-                    "overs_faced": 0.0,
-                    "runs_conceded": 0,
-                    "overs_bowled": 0.0,
-                    "nrr": 0.0,
-                    "nrr_formatted": "0.000",
-                }
+        s_t1 = find_team_stat(team1_id, match.batting_team.name if match.batting_team else None)
+        s_t2 = find_team_stat(team2_id, match.bowling_team.name if match.bowling_team else None)
 
-        s_t1 = stats_by_team[team1_id]
-        s_t2 = stats_by_team[team2_id]
+        # Only process match if at least one team belongs to this group
+        if not s_t1 and not s_t2:
+            continue
 
         match_max_overs = default_max_overs
         if match.tournament and match.tournament.max_overs:
@@ -287,84 +343,103 @@ def calculate_group_standings(group_id: Any) -> List[Dict[str, Any]]:
                 res_status = Match.ResultStatus.COMPLETED
 
         if res_status == Match.ResultStatus.NO_RESULT:
-            s_t1["played"] += 1
-            s_t1["no_result"] += 1
-            s_t1["points"] += 1
-
-            s_t2["played"] += 1
-            s_t2["no_result"] += 1
-            s_t2["points"] += 1
+            if s_t1:
+                s_t1["played"] += 1
+                s_t1["no_result"] += 1
+                s_t1["points"] += 1
+            if s_t2:
+                s_t2["played"] += 1
+                s_t2["no_result"] += 1
+                s_t2["points"] += 1
             continue
 
         if res_status == Match.ResultStatus.TIED:
-            s_t1["played"] += 1
-            s_t1["tied"] += 1
-            s_t1["points"] += 1
-
-            s_t2["played"] += 1
-            s_t2["tied"] += 1
-            s_t2["points"] += 1
+            if s_t1:
+                s_t1["played"] += 1
+                s_t1["tied"] += 1
+                s_t1["points"] += 1
+            if s_t2:
+                s_t2["played"] += 1
+                s_t2["tied"] += 1
+                s_t2["points"] += 1
         else:
             # COMPLETED match with winner determination
-            s_t1["played"] += 1
-            s_t2["played"] += 1
+            if s_t1:
+                s_t1["played"] += 1
+            if s_t2:
+                s_t2["played"] += 1
 
             winner_id = str(match.winner_id) if match.winner_id else None
-            inn1, inn2 = _extract_match_innings(match)
 
             if not winner_id and inn1 and inn2:
                 if inn1["runs"] > inn2["runs"]:
-                    winner_id = inn1["team_id"]
+                    winner_id = inn1.get("team_id")
                 elif inn2["runs"] > inn1["runs"]:
-                    winner_id = inn2["team_id"]
+                    winner_id = inn2.get("team_id")
                 else:
                     # Scores are equal -> tied
-                    s_t1["tied"] += 1
-                    s_t1["points"] += 1
-                    s_t2["tied"] += 1
-                    s_t2["points"] += 1
+                    if s_t1:
+                        s_t1["tied"] += 1
+                        s_t1["points"] += 1
+                    if s_t2:
+                        s_t2["tied"] += 1
+                        s_t2["points"] += 1
                     winner_id = None
 
             if winner_id:
-                if winner_id == team1_id:
-                    s_t1["won"] += 1
-                    s_t1["points"] += 2
-                    s_t2["lost"] += 1
-                elif winner_id == team2_id:
-                    s_t2["won"] += 1
-                    s_t2["points"] += 2
-                    s_t1["lost"] += 1
+                w_stat = find_team_stat(winner_id)
+                if w_stat:
+                    w_stat["won"] += 1
+                    w_stat["points"] += 2
+                    loser_stat = s_t2 if (w_stat == s_t1) else s_t1
+                    if loser_stat:
+                        loser_stat["lost"] += 1
 
-        # Extract Innings details for NRR computation
-        inn1, inn2 = _extract_match_innings(match)
+        # Attribution of Innings for NRR
         if inn1 and inn2:
-            # Match Innings 1: Team 1 bat, Team 2 bowl
+            t_inn1_bat = find_team_stat(inn1.get("team_id"), inn1.get("team_name"))
+            t_inn2_bat = find_team_stat(inn2.get("team_id"), inn2.get("team_name"))
+
+            t_inn1_bowl = find_team_stat(inn1.get("bowling_team_id"), inn1.get("bowling_team_name"))
+            if not t_inn1_bowl:
+                t_inn1_bowl = t_inn2_bat if t_inn2_bat else (s_t2 if t_inn1_bat == s_t1 else s_t1)
+
+            if not t_inn2_bat:
+                t_inn2_bat = t_inn1_bowl
+
+            t_inn2_bowl = find_team_stat(inn2.get("bowling_team_id"), inn2.get("bowling_team_name"))
+            if not t_inn2_bowl:
+                t_inn2_bowl = t_inn1_bat
+
             r1 = inn1["runs"]
             # Enforce All-Out Rule: if all out before max_overs, set overs_faced = max_overs
-            if inn1["is_all_out"] or inn1["overs_decimal"] > match_max_overs:
+            if inn1.get("is_all_out") or inn1.get("overs_decimal", 0) > match_max_overs:
                 ov_faced_1 = float(match_max_overs)
             else:
-                ov_faced_1 = inn1["overs_decimal"]
+                ov_faced_1 = float(inn1.get("overs_decimal", 0))
 
-            # Match Innings 2: Team 2 bat, Team 1 bowl
             r2 = inn2["runs"]
             # Enforce All-Out Rule for innings 2
-            if inn2["is_all_out"] or inn2["overs_decimal"] > match_max_overs:
+            if inn2.get("is_all_out") or inn2.get("overs_decimal", 0) > match_max_overs:
                 ov_faced_2 = float(match_max_overs)
             else:
-                ov_faced_2 = inn2["overs_decimal"]
+                ov_faced_2 = float(inn2.get("overs_decimal", 0))
 
-            # Team 1 accumulators
-            s_t1["runs_scored"] += r1
-            s_t1["overs_faced"] += ov_faced_1
-            s_t1["runs_conceded"] += r2
-            s_t1["overs_bowled"] += ov_faced_2
+            # Team 1 bat, Team 2 bowl in Innings 1
+            if t_inn1_bat:
+                t_inn1_bat["runs_scored"] += r1
+                t_inn1_bat["overs_faced"] += ov_faced_1
+            if t_inn1_bowl:
+                t_inn1_bowl["runs_conceded"] += r1
+                t_inn1_bowl["overs_bowled"] += ov_faced_1
 
-            # Team 2 accumulators
-            s_t2["runs_scored"] += r2
-            s_t2["overs_faced"] += ov_faced_2
-            s_t2["runs_conceded"] += r1
-            s_t2["overs_bowled"] += ov_faced_1
+            # Team 2 bat, Team 1 bowl in Innings 2
+            if t_inn2_bat:
+                t_inn2_bat["runs_scored"] += r2
+                t_inn2_bat["overs_faced"] += ov_faced_2
+            if t_inn2_bowl:
+                t_inn2_bowl["runs_conceded"] += r2
+                t_inn2_bowl["overs_bowled"] += ov_faced_2
 
     # Calculate NRR for each team: NRR = (Runs Scored / Overs Faced) - (Runs Conceded / Overs Bowled)
     standings: List[Dict[str, Any]] = []
@@ -387,9 +462,8 @@ def calculate_group_standings(group_id: Any) -> List[Dict[str, Any]]:
         else:
             team_stat["nrr_formatted"] = "0.000"
 
-        # Round overs to 1 decimal for readable display
-        team_stat["overs_faced_display"] = round(overs_faced, 1)
-        team_stat["overs_bowled_display"] = round(overs_bowled, 1)
+        team_stat["overs_faced_display"] = format_cricket_overs(overs_faced)
+        team_stat["overs_bowled_display"] = format_cricket_overs(overs_bowled)
 
         standings.append(team_stat)
 

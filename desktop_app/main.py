@@ -80,6 +80,8 @@ def load_persisted_state():
                     state = loaded_state
                     if not state.get("match_id"):
                         state["match_id"] = str(uuid.uuid4())
+                    if state.get("balls_this_over", 0) == 0 and state.get("overs_completed", 0) > 0 and state.get("previous_bowler") and state.get("bowler", {}).get("name") == state.get("previous_bowler") and not state.get("match_over"):
+                        state["needs_new_bowler"] = True
                     history_stack = data.get("history_stack", []) if "history_stack" in data else []
                     print(f"[load_persisted_state] Restored active match from {STATE_FILE} (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)}, match_id: {state.get('match_id')})", flush=True)
                     return True
@@ -102,6 +104,8 @@ def load_persisted_state():
                         state = loaded
                         if not state.get("match_id") and db_id:
                             state["match_id"] = str(db_id)
+                        if state.get("balls_this_over", 0) == 0 and state.get("overs_completed", 0) > 0 and state.get("previous_bowler") and state.get("bowler", {}).get("name") == state.get("previous_bowler") and not state.get("match_over"):
+                            state["needs_new_bowler"] = True
                         history_stack = []
                         print(f"[load_persisted_state] Restored LIVE match from SQLite (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)}, match_id: {state.get('match_id')})", flush=True)
                         save_persisted_state()
@@ -161,10 +165,12 @@ def check_over_end():
                 end_match()
             return
             
-        eel.showNewOverPrompt(state["previous_bowler"])
+        state["needs_new_bowler"] = True
         swap_batsmen()
         sync_active_stats()
+        save_persisted_state()
         ws_manager.send_state(state)
+        eel.showNewOverPrompt(state["previous_bowler"])
 
 def end_first_innings():
     global state
@@ -491,6 +497,7 @@ def undo():
 @eel.expose
 def set_new_bowler(name):
     global state
+    state["needs_new_bowler"] = False
     sync_active_stats()
     if name in state["bowler_stats"]:
         state["bowler"] = state["bowler_stats"][name].copy()
@@ -498,6 +505,7 @@ def set_new_bowler(name):
         state["bowler"] = {"name": name, "runs": 0, "overs": 0.0, "wickets": 0, "maidens": 0}
     
     sync_active_stats()
+    save_persisted_state()
     ws_manager.send_state(state)
 
 @eel.expose
@@ -519,6 +527,16 @@ def set_ball_speed(speed):
 def process_delivery(label, team_runs, bat_runs, bowl_runs, valid_ball, physical_runs, is_wide):
     global state
     if state.get("match_over"):
+        return
+    if state.get("needs_new_bowler") or (
+        state.get("balls_this_over") == 0 and
+        state.get("overs_completed", 0) > 0 and
+        state.get("bowler", {}).get("name") and
+        state.get("previous_bowler") and
+        state.get("bowler", {}).get("name") == state.get("previous_bowler")
+    ):
+        state["needs_new_bowler"] = True
+        eel.showNewOverPrompt(state.get("previous_bowler", ""))
         return
     save_state_for_undo()
     
@@ -606,6 +624,16 @@ def process_delivery(label, team_runs, bat_runs, bowl_runs, valid_ball, physical
 def score_wicket(method, new_bat_name, physical_runs=0, illegal_delivery="None", byes_type="None", out_batsman_type="Striker", fielder_name=""):
     global state
     if state.get("match_over"):
+        return
+    if state.get("needs_new_bowler") or (
+        state.get("balls_this_over") == 0 and
+        state.get("overs_completed", 0) > 0 and
+        state.get("bowler", {}).get("name") and
+        state.get("previous_bowler") and
+        state.get("bowler", {}).get("name") == state.get("previous_bowler")
+    ):
+        state["needs_new_bowler"] = True
+        eel.showNewOverPrompt(state.get("previous_bowler", ""))
         return
     save_state_for_undo()
     
