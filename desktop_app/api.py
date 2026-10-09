@@ -694,6 +694,23 @@ def get_group_standings(group_id):
             print(f"[api.get_group_standings] Direct services failed: {inner_e}")
             return []
 
+def _normalize_leaderboard_images(data):
+    if isinstance(data, dict):
+        for k, v in list(data.items()):
+            if k in ("player_image", "image", "team_logo", "logo") and isinstance(v, str) and v:
+                clean = v.strip()
+                if clean not in ("", "null", "None") and not (clean.startswith("http://") or clean.startswith("https://") or clean.startswith("data:")):
+                    if clean.startswith("/"):
+                        data[k] = f"http://127.0.0.1:8000{clean}"
+                    else:
+                        data[k] = f"http://127.0.0.1:8000/media/{clean}"
+            elif isinstance(v, (dict, list)):
+                _normalize_leaderboard_images(v)
+    elif isinstance(data, list):
+        for item in data:
+            _normalize_leaderboard_images(item)
+    return data
+
 def get_tournament_leaderboards(tournament_id, group_id=None):
     try:
         url = f"{BASE_URL}/tournaments/{tournament_id}/leaderboards/"
@@ -702,7 +719,7 @@ def get_tournament_leaderboards(tournament_id, group_id=None):
             params["group"] = group_id
         response = requests.get(url, params=params, timeout=4.0)
         response.raise_for_status()
-        return response.json()
+        return _normalize_leaderboard_images(response.json())
     except Exception as e:
         print(f"[api.get_tournament_leaderboards] API fallback to services: {e}")
         try:
@@ -710,7 +727,8 @@ def get_tournament_leaderboards(tournament_id, group_id=None):
             os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cricket_backend.settings")
             django.setup()
             from scoring.services import calculate_tournament_leaderboards
-            return calculate_tournament_leaderboards(tournament_id, group_id=group_id)
+            raw_res = calculate_tournament_leaderboards(tournament_id, group_id=group_id)
+            return _normalize_leaderboard_images(raw_res)
         except Exception as inner_e:
             print(f"[api.get_tournament_leaderboards] Direct services failed: {inner_e}")
             return {

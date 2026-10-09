@@ -160,7 +160,7 @@ function getHitBoundaryType(ballLabel: string): 'FOUR' | 'SIX' | null {
 
 export default function OverlayPage() {
   const [mounted, setMounted] = useState(false);
-  const { matchState, isConnected } = useMatchState();
+  const { matchState, isConnected, matchId } = useMatchState();
   const [currentAlert, setCurrentAlert] = useState<AlertData | null>(null);
   const [playerOutCard, setPlayerOutCard] = useState<PlayerOutData | null>(null);
   const pendingOutCardRef = useRef<PlayerOutData | null>(null);
@@ -465,7 +465,7 @@ export default function OverlayPage() {
       </AnimatePresence>
 
       {/* SSE Stream Disconnected Badge (shown only if offline) */}
-      {!isConnected && (
+      {!isConnected ? (
         <div 
           className="absolute top-4 left-4 px-3.5 py-1.5 bg-red-600/90 text-white rounded-full text-xs font-mono font-bold animate-pulse shadow-lg backdrop-blur-md border border-red-400/30 flex items-center gap-2"
           suppressHydrationWarning
@@ -473,7 +473,16 @@ export default function OverlayPage() {
           <span className="w-2 h-2 rounded-full bg-white animate-ping" />
           Stream Offline
         </div>
-      )}
+      ) : matchId ? (
+        <div 
+          className="absolute top-4 left-4 px-3 py-1 bg-slate-900/80 backdrop-blur-md text-white/80 rounded-full text-xs font-mono font-medium border border-white/10 flex items-center gap-1.5 shadow-lg"
+          title={`Streaming Match: ${matchId}`}
+          suppressHydrationWarning
+        >
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Match: <strong className="text-white">{matchId.slice(0, 8)}...</strong></span>
+        </div>
+      ) : null}
 
       {/* Interactive Dev Testing Controls (Press 4, 6, W or click pills) */}
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2">

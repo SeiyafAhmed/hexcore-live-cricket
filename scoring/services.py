@@ -537,6 +537,20 @@ def calculate_tournament_leaderboards(tournament_id: Any, group_id: Optional[Any
         matches_qs = matches_qs.filter(group_id=filter_group["id"])
     matches = list(matches_qs.select_related("batting_team", "bowling_team", "winner").all())
 
+    # Helper to resolve absolute media URLs for desktop app and remote overlays
+    def _format_media_url(val: Any) -> Optional[str]:
+        if not val:
+            return None
+        url = getattr(val, "url", None) or str(val)
+        if not url or url.strip() in ("", "None", "null"):
+            return None
+        clean = url.strip()
+        if clean.startswith("http://") or clean.startswith("https://") or clean.startswith("data:"):
+            return clean
+        if clean.startswith("/"):
+            return f"http://127.0.0.1:8000{clean}"
+        return f"http://127.0.0.1:8000/media/{clean}"
+
     # Build player metadata mapping for role, team details, jersey number, and photos
     player_db_map: Dict[str, Dict[str, Any]] = {}
     for p in Player.objects.select_related("team").all():
@@ -549,12 +563,20 @@ def calculate_tournament_leaderboards(tournament_id: Any, group_id: Optional[Any
             "team_id": str(p.team.id) if p.team else None,
             "team_name": p.team.name if p.team else "",
             "team_color": p.team.theme_color if p.team else "#0f547c",
-            "team_logo": p.team.logo.url if (p.team and p.team.logo) else None,
-            "image": p.image.url if p.image else None,
+            "team_logo": _format_media_url(p.team.logo) if (p.team and p.team.logo) else None,
+            "image": _format_media_url(p.image) if p.image else None,
         }
         player_db_map[full_n.lower()] = info
         player_db_map[str(p.id).replace("-", "")] = info
         player_db_map[str(p.id)] = info
+        if p.first_name and p.first_name.strip():
+            fn = p.first_name.strip().lower()
+            if fn not in player_db_map:
+                player_db_map[fn] = info
+        if p.last_name and p.last_name.strip():
+            ln = p.last_name.strip().lower()
+            if ln not in player_db_map:
+                player_db_map[ln] = info
 
     def get_player_meta(name_or_id: str, default_team_name: str = "", default_team_color: str = "#0f547c") -> Dict[str, Any]:
         key = str(name_or_id).strip().lower()
@@ -563,6 +585,9 @@ def calculate_tournament_leaderboards(tournament_id: Any, group_id: Optional[Any
             return player_db_map[key]
         if clean_id in player_db_map:
             return player_db_map[clean_id]
+        for db_name, db_info in player_db_map.items():
+            if len(key) >= 3 and (key in db_name or db_name in key):
+                return db_info
         return {
             "id": None,
             "name": str(name_or_id).strip(),

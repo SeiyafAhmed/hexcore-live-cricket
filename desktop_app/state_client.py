@@ -54,8 +54,18 @@ class StateSyncManager(threading.Thread):
             conn = sqlite3.connect(DB_PATH)
             try:
                 cur = conn.cursor()
-                cur.execute("SELECT id FROM scoring_match WHERE status = 'LIVE' ORDER BY updated_at DESC LIMIT 1")
-                row = cur.fetchone()
+                mid = state.get("match_id")
+                raw_mid = mid.replace("-", "") if mid else None
+
+                row = None
+                if mid:
+                    cur.execute("SELECT id FROM scoring_match WHERE id = ? OR id = ? LIMIT 1", (mid, raw_mid))
+                    row = cur.fetchone()
+
+                if not row and not mid:
+                    cur.execute("SELECT id FROM scoring_match WHERE status = 'LIVE' ORDER BY updated_at DESC LIMIT 1")
+                    row = cur.fetchone()
+
                 now = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 state_json = json.dumps(state)
 
@@ -77,25 +87,20 @@ class StateSyncManager(threading.Thread):
                         WHERE id = ?
                     """, (state_json, status_val, res_status, raw_win_id, raw_tourn_id, raw_grp_id, now, match_id))
                 else:
-                    cur.execute("SELECT id FROM scoring_match ORDER BY updated_at DESC LIMIT 1")
-                    any_row = cur.fetchone()
-                    if any_row:
-                        match_id = any_row[0]
-                        cur.execute("""
-                            UPDATE scoring_match
-                            SET current_innings_state = ?, status = ?, result_status = ?, winner_id = ?, tournament_id = COALESCE(?, tournament_id), group_id = COALESCE(?, group_id), updated_at = ?
-                            WHERE id = ?
-                        """, (state_json, status_val, res_status, raw_win_id, raw_tourn_id, raw_grp_id, now, match_id))
-                    else:
+                    bat_tid = state.get("batting_team_id")
+                    bowl_tid = state.get("bowling_team_id")
+                    if not bat_tid or not bowl_tid:
                         cur.execute("SELECT id FROM scoring_team LIMIT 2")
                         team_rows = cur.fetchall()
-                        bat_tid = team_rows[0][0] if len(team_rows) > 0 else uuid.uuid4().hex
-                        bowl_tid = team_rows[1][0] if len(team_rows) > 1 else uuid.uuid4().hex
-                        new_id = uuid.uuid4().hex
-                        cur.execute("""
-                            INSERT INTO scoring_match (id, status, result_status, winner_id, tournament_id, group_id, current_innings_state, created_at, updated_at, batting_team_id, bowling_team_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (new_id, status_val, res_status, raw_win_id, raw_tourn_id, raw_grp_id, state_json, now, now, bat_tid, bowl_tid))
+                        if not bat_tid:
+                            bat_tid = team_rows[0][0] if len(team_rows) > 0 else uuid.uuid4().hex
+                        if not bowl_tid:
+                            bowl_tid = team_rows[1][0] if len(team_rows) > 1 else uuid.uuid4().hex
+                    new_id = mid if mid else uuid.uuid4().hex
+                    cur.execute("""
+                        INSERT INTO scoring_match (id, status, result_status, winner_id, tournament_id, group_id, current_innings_state, created_at, updated_at, batting_team_id, bowling_team_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (new_id, status_val, res_status, raw_win_id, raw_tourn_id, raw_grp_id, state_json, now, now, bat_tid, bowl_tid))
                 conn.commit()
             finally:
                 conn.close()

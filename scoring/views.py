@@ -5,10 +5,12 @@ All viewsets use MultiPartParser + FormParser so that image uploads
 are accepted via multipart/form-data alongside JSON payloads.
 """
 
+import copy
 import json
 import queue
 import threading
 import time
+import uuid
 
 from django.db.models import Avg, Count, Sum
 from django.db.models.signals import post_save
@@ -282,60 +284,84 @@ class BallViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class MatchEventHub:
-    """Thread-safe pub/sub hub to broadcast match state updates to SSE clients."""
+    """Thread-safe pub/sub hub to broadcast match state updates to SSE clients with match_id scoping."""
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._subscribers = set()
+        self._subscribers = {}  # queue.Queue -> normalized target match_id (or None for global)
 
-    def subscribe(self):
+    def subscribe(self, match_id=None):
         q = queue.Queue(maxsize=100)
+        norm_id = str(match_id).replace("-", "").lower() if match_id else None
         with self._lock:
-            self._subscribers.add(q)
+            self._subscribers[q] = norm_id
         return q
 
     def unsubscribe(self, q):
         with self._lock:
-            self._subscribers.discard(q)
+            self._subscribers.pop(q, None)
 
-    def notify(self, data=None):
+    def notify(self, data=None, match_id=None):
+        norm_id = str(match_id).replace("-", "").lower() if match_id else None
+        if not norm_id and isinstance(data, dict) and data.get("match_id"):
+            norm_id = str(data["match_id"]).replace("-", "").lower()
+
         with self._lock:
-            for q in list(self._subscribers):
-                try:
-                    q.put_nowait(data)
-                except queue.Full:
-                    pass
+            for q, sub_match_id in list(self._subscribers.items()):
+                # Notify if subscriber listens globally (sub_match_id is None)
+                # OR if the event's match_id matches the subscriber's requested match_id
+                if sub_match_id is None or norm_id is None or sub_match_id == norm_id:
+                    try:
+                        q.put_nowait(data)
+                    except queue.Full:
+                        pass
 
 match_event_hub = MatchEventHub()
 
 
 @receiver(post_save, sender=Match)
 def on_match_saved(sender, instance, **kwargs):
-    """Notify all SSE clients whenever a Match record is updated in the database."""
+    """Notify relevant SSE clients whenever a Match record is updated in the database."""
+    mid = str(instance.id)
     if instance.current_innings_state:
-        match_event_hub.notify(instance.current_innings_state)
+        st = copy.deepcopy(instance.current_innings_state)
+        st["match_id"] = mid
+        match_event_hub.notify(st, match_id=mid)
     else:
-        match_event_hub.notify({})
+        match_event_hub.notify({"match_id": mid}, match_id=mid)
 
 
 @receiver(post_save, sender=Ball)
 def on_ball_saved(sender, instance, **kwargs):
-    """Notify all SSE clients whenever a Ball record is logged."""
+    """Notify relevant SSE clients whenever a Ball record is logged."""
     if instance.match and instance.match.current_innings_state:
-        match_event_hub.notify(instance.match.current_innings_state)
+        mid = str(instance.match.id)
+        st = copy.deepcopy(instance.match.current_innings_state)
+        st["match_id"] = mid
+        match_event_hub.notify(st, match_id=mid)
 
 
 def get_current_match_state(match_id=None):
     """Retrieve the latest or requested match state from the database."""
     try:
+        m = None
         if match_id:
-            m = Match.objects.filter(id=match_id).first()
+            raw_id = str(match_id).replace("-", "")
+            try:
+                parsed_uuid = uuid.UUID(hex=raw_id)
+                m = Match.objects.filter(id=parsed_uuid).first()
+            except Exception:
+                pass
+            if not m:
+                m = Match.objects.filter(id=match_id).first()
         else:
             m = Match.objects.filter(status=Match.Status.LIVE).order_by("-updated_at").first()
             if not m:
                 m = Match.objects.order_by("-updated_at").first()
         if m and m.current_innings_state:
-            return m.current_innings_state
+            st = copy.deepcopy(m.current_innings_state)
+            st["match_id"] = str(m.id)
+            return st
     except Exception as e:
         print("[get_current_match_state] Error:", e)
     return None
@@ -344,13 +370,14 @@ def get_current_match_state(match_id=None):
 def stream_match_state(request):
     """
     StreamingHttpResponse endpoint for Server-Sent Events (SSE).
-    GET /api/stream/
-    Yields the JSON match state whenever the database is updated.
+    GET /api/stream/?match_id=<id>
+    Yields the JSON match state whenever the requested match is updated.
     """
     match_id = request.GET.get("match_id")
+    norm_mid = str(match_id).replace("-", "").lower() if match_id else None
 
     def event_stream():
-        q = match_event_hub.subscribe()
+        q = match_event_hub.subscribe(match_id=match_id)
         last_sent_json = None
         last_ping = time.time()
 
@@ -367,7 +394,14 @@ def stream_match_state(request):
                 try:
                     # Wait for in-process DB update signal (timeout 0.25s)
                     notified_data = q.get(timeout=0.25)
-                    state_to_send = notified_data if (notified_data and not match_id) else get_current_match_state(match_id)
+                    if notified_data:
+                        event_mid = str(notified_data.get("match_id", "")).replace("-", "").lower()
+                        if not norm_mid or event_mid == norm_mid:
+                            state_to_send = notified_data
+                        else:
+                            state_to_send = get_current_match_state(match_id)
+                    else:
+                        state_to_send = get_current_match_state(match_id)
                 except queue.Empty:
                     # Timeout: Check database to detect direct/external SQLite updates
                     state_to_send = get_current_match_state(match_id)
@@ -404,8 +438,8 @@ def stream_match_state(request):
 @permission_classes([AllowAny])
 def match_state_api(request):
     """
-    GET: Retrieve the current match state from database.
-    POST: Update or create the match state in database (triggers SSE stream via post_save signal).
+    GET: Retrieve match state by match_id or latest live match.
+    POST: Update or create match state scoped to match_id.
     """
     if request.method == "GET":
         match_id = request.GET.get("match_id")
@@ -416,10 +450,22 @@ def match_state_api(request):
     if not isinstance(state_payload, dict):
         return Response({"error": "Payload must be a JSON object"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Find active match or create one
-    match = Match.objects.filter(status=Match.Status.LIVE).order_by("-updated_at").first()
-    if not match:
-        match = Match.objects.order_by("-updated_at").first()
+    match_id = state_payload.get("match_id") or request.GET.get("match_id")
+    match = None
+
+    if match_id:
+        raw_id = str(match_id).replace("-", "")
+        try:
+            parsed_uuid = uuid.UUID(hex=raw_id)
+            match = Match.objects.filter(id=parsed_uuid).first()
+        except Exception:
+            pass
+        if not match:
+            match = Match.objects.filter(id=match_id).first()
+
+    # Fallback to current live match only if caller did NOT supply an explicit match_id
+    if not match and not match_id:
+        match = Match.objects.filter(status=Match.Status.LIVE).order_by("-updated_at").first()
 
     if not match:
         bat_team_id = state_payload.get("batting_team_id")
@@ -432,16 +478,21 @@ def match_state_api(request):
         if not bowl_team or bowl_team.id == bat_team.id:
             bowl_team = Team.objects.create(name=state_payload.get("team_2_name") or "Team 2", theme_color="#dc2626")
 
-        match = Match.objects.create(
-            batting_team=bat_team,
-            bowling_team=bowl_team,
-            status=Match.Status.LIVE,
-            current_innings_state=state_payload,
-            tournament_id=state_payload.get("tournament_id"),
-            group_id=state_payload.get("group_id"),
-        )
+        match_kwargs = {
+            "batting_team": bat_team,
+            "bowling_team": bowl_team,
+            "status": Match.Status.LIVE,
+            "current_innings_state": state_payload,
+            "tournament_id": state_payload.get("tournament_id"),
+            "group_id": state_payload.get("group_id"),
+        }
+        if match_id:
+            try:
+                match_kwargs["id"] = uuid.UUID(hex=str(match_id).replace("-", ""))
+            except Exception:
+                pass
+        match = Match.objects.create(**match_kwargs)
     else:
-        match.current_innings_state = state_payload
         if state_payload.get("tournament_id"):
             match.tournament_id = state_payload.get("tournament_id")
         if state_payload.get("group_id"):
@@ -454,6 +505,15 @@ def match_state_api(request):
             match.status = Match.Status.COMPLETED
         else:
             match.status = Match.Status.LIVE
-        match.save()
 
-    return Response({"status": "success", "match_id": str(match.id)})
+    canonical_mid = str(match.id)
+    state_payload["match_id"] = canonical_mid
+    match.current_innings_state = state_payload
+    match.save()
+
+    return Response({
+        "status": "success",
+        "match_id": canonical_mid,
+        "match_status": match.status,
+        "state": state_payload
+    })

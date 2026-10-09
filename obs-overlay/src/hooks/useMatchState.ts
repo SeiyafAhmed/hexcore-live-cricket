@@ -32,6 +32,7 @@ export interface WicketCardData {
 }
 
 export interface MatchState {
+  match_id?: string;
   runs: number;
   wickets: number;
   overs_completed: number;
@@ -73,15 +74,30 @@ export interface MatchState {
 export function useMatchState(url?: string) {
   const [matchState, setMatchState] = useState<MatchState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     let isUnmounted = false;
 
+    // Detect match_id from URL query string if present (e.g. ?match_id=... or ?match=...)
+    let queryMatchId: string | null = null;
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      queryMatchId = params.get('match_id') || params.get('match') || null;
+      if (queryMatchId) {
+        setActiveMatchId(queryMatchId);
+      }
+    }
+
     // Use native EventSource API to connect to the SSE streaming endpoint
-    const endpoint = url || (typeof window !== 'undefined'
+    let endpoint = url || (typeof window !== 'undefined'
       ? `http://${window.location.hostname || '127.0.0.1'}:8000/api/stream/`
       : 'http://127.0.0.1:8000/api/stream/');
+
+    if (queryMatchId && !endpoint.includes('match_id=')) {
+      endpoint += (endpoint.includes('?') ? '&' : '?') + `match_id=${encodeURIComponent(queryMatchId)}`;
+    }
 
     function connect() {
       if (isUnmounted) return;
@@ -96,7 +112,7 @@ export function useMatchState(url?: string) {
 
         es.onopen = () => {
           if (isUnmounted) return;
-          console.log('[SSE] Connected to match state stream');
+          console.log('[SSE] Connected to match state stream:', endpoint);
           setIsConnected(true);
         };
 
@@ -108,6 +124,9 @@ export function useMatchState(url?: string) {
             if (data && typeof data === 'object' && Object.keys(data).length > 0) {
               setMatchState(data);
               setIsConnected(true);
+              if (data.match_id) {
+                setActiveMatchId(data.match_id);
+              }
             }
           } catch (err) {
             console.error('[SSE] Failed to parse stream data:', err);
@@ -138,5 +157,5 @@ export function useMatchState(url?: string) {
     };
   }, [url]);
 
-  return { matchState, isConnected };
+  return { matchState, isConnected, matchId: activeMatchId };
 }

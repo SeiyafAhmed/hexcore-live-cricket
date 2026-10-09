@@ -5,6 +5,7 @@ import time
 import os
 import json
 import sqlite3
+import uuid
 import api
 from state_client import state_manager, ws_manager
 
@@ -30,9 +31,23 @@ def save_persisted_state():
         os.replace(temp_file, STATE_FILE)
     except Exception as e:
         print(f"[save_persisted_state] Error saving state: {e}", flush=True)
+    try:
+        cur_mid = state.get("match_id")
+        if os.path.exists(DB_PATH) and cur_mid:
+            conn = sqlite3.connect(DB_PATH)
+            try:
+                cur = conn.cursor()
+                raw_mid = str(cur_mid).replace("-", "")
+                cur.execute("UPDATE scoring_match SET current_innings_state = ? WHERE (id = ? OR id = ?)", (json.dumps(state), str(cur_mid), raw_mid))
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception as ex:
+        pass
 
 def clear_persisted_state():
     global state, history_stack
+    cur_mid = state.get("match_id") if isinstance(state, dict) else None
     state = {}
     history_stack = []
     if os.path.exists(STATE_FILE):
@@ -41,11 +56,12 @@ def clear_persisted_state():
         except Exception as e:
             print(f"[clear_persisted_state] Error removing {STATE_FILE}: {e}", flush=True)
     try:
-        if os.path.exists(DB_PATH):
+        if os.path.exists(DB_PATH) and cur_mid:
             conn = sqlite3.connect(DB_PATH)
             try:
                 cur = conn.cursor()
-                cur.execute("UPDATE scoring_match SET status = 'COMPLETED' WHERE status = 'LIVE'")
+                raw_mid = cur_mid.replace("-", "")
+                cur.execute("UPDATE scoring_match SET status = 'COMPLETED' WHERE (id = ? OR id = ?) AND status = 'LIVE'", (cur_mid, raw_mid))
                 conn.commit()
             finally:
                 conn.close()
@@ -62,8 +78,10 @@ def load_persisted_state():
                 loaded_state = data.get("state") if ("state" in data and isinstance(data["state"], dict)) else data
                 if isinstance(loaded_state, dict) and loaded_state.get("team_1_name"):
                     state = loaded_state
+                    if not state.get("match_id"):
+                        state["match_id"] = str(uuid.uuid4())
                     history_stack = data.get("history_stack", []) if "history_stack" in data else []
-                    print(f"[load_persisted_state] Restored active match from {STATE_FILE} (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)})", flush=True)
+                    print(f"[load_persisted_state] Restored active match from {STATE_FILE} (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)}, match_id: {state.get('match_id')})", flush=True)
                     return True
         except Exception as e:
             print(f"[load_persisted_state] Error loading {STATE_FILE}: {e}", flush=True)
@@ -74,15 +92,18 @@ def load_persisted_state():
             conn = sqlite3.connect(DB_PATH)
             try:
                 cur = conn.cursor()
-                cur.execute("SELECT current_innings_state FROM scoring_match WHERE status = 'LIVE' ORDER BY updated_at DESC LIMIT 1")
+                cur.execute("SELECT id, current_innings_state FROM scoring_match WHERE status = 'LIVE' ORDER BY updated_at DESC LIMIT 1")
                 row = cur.fetchone()
-                if row and row[0]:
-                    raw_val = row[0]
+                if row and row[1]:
+                    db_id = row[0]
+                    raw_val = row[1]
                     loaded = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
                     if isinstance(loaded, dict) and loaded.get("team_1_name"):
                         state = loaded
+                        if not state.get("match_id") and db_id:
+                            state["match_id"] = str(db_id)
                         history_stack = []
-                        print(f"[load_persisted_state] Restored LIVE match from SQLite (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)})", flush=True)
+                        print(f"[load_persisted_state] Restored LIVE match from SQLite (overs: {state.get('overs_completed', 0)}.{state.get('balls_this_over', 0)}, match_id: {state.get('match_id')})", flush=True)
                         save_persisted_state()
                         return True
             finally:
@@ -369,11 +390,14 @@ def console_log(msg):
     print("JS LOG:", msg, flush=True)
 
 @eel.expose
-def start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, overs, tournament_id=None, group_id=None):
+def start_match(batId, batName, bowlId, bowlName, striker, nonstriker, bowler, overs, tournament_id=None, group_id=None, match_id=None):
     global state, history_stack
     history_stack = []
     
+    assigned_mid = match_id if (match_id and str(match_id).strip() not in ("", "null", "None")) else str(uuid.uuid4())
+
     state = {
+        "match_id": assigned_mid,
         "innings": 1,
         "target": None,
         "max_overs": int(overs),
@@ -871,6 +895,19 @@ def retire_hurt(player_type, new_bat_name):
     ws_manager.send_state(state)
 
 @eel.expose
+def swap_striker():
+    global state
+    if not state or state.get("match_over"):
+        return False
+    if not state.get("striker") or not state.get("non_striker"):
+        return False
+    save_state_for_undo()
+    swap_batsmen()
+    sync_active_stats()
+    ws_manager.send_state(state)
+    return True
+
+@eel.expose
 def set_target(new_target):
     global state
     if not state or state.get("match_over") or state.get("innings", 1) == 1:
@@ -905,14 +942,111 @@ def update_match_format(overs, wickets):
     if state["overs_completed"] >= state["max_overs"] or state["wickets"] >= state["max_wickets"]:
         end_first_innings()
 
+@eel.expose
+def get_active_matches():
+    results = []
+    if not os.path.exists(SQLITE_DB_PATH):
+        return results
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT sm.id, sm.current_innings_state, t1.name, t2.name, sm.status, sm.updated_at
+                FROM scoring_match sm
+                LEFT JOIN scoring_team t1 ON sm.team_1_id = t1.id
+                LEFT JOIN scoring_team t2 ON sm.team_2_id = t2.id
+                WHERE sm.status = 'LIVE'
+                ORDER BY sm.updated_at DESC
+            """)
+            rows = cur.fetchall()
+            for row in rows:
+                mid = str(row[0])
+                raw_state = row[1]
+                t1_name = row[2] or "Team 1"
+                t2_name = row[3] or "Team 2"
+                parsed_state = None
+                if raw_state:
+                    try:
+                        parsed_state = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
+                    except Exception:
+                        pass
+                if isinstance(parsed_state, dict):
+                    t1_name = parsed_state.get("team_1_name") or t1_name
+                    t2_name = parsed_state.get("team_2_name") or t2_name
+                    runs = parsed_state.get("runs", 0)
+                    wkts = parsed_state.get("wickets", 0)
+                    overs = f"{parsed_state.get('overs_completed', 0)}.{parsed_state.get('balls_this_over', 0)}"
+                    inn = parsed_state.get("innings", 1)
+                else:
+                    runs, wkts, overs, inn = 0, 0, "0.0", 1
+                
+                results.append({
+                    "id": mid,
+                    "team_1_name": t1_name,
+                    "team_2_name": t2_name,
+                    "score": f"{runs}/{wkts}",
+                    "overs": overs,
+                    "innings": inn,
+                    "is_current": bool(state and (str(state.get("match_id", "")).replace("-", "") == mid.replace("-", "")))
+                })
+        finally:
+            conn.close()
+    except Exception as ex:
+        print(f"[get_active_matches] Error: {ex}", flush=True)
+    return results
+
+@eel.expose
+def switch_match(match_id):
+    global state, history_stack
+    if not match_id:
+        return False
+    clean_mid = str(match_id).replace("-", "")
+    if not os.path.exists(SQLITE_DB_PATH):
+        return False
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id, current_innings_state FROM scoring_match WHERE id = ? OR id = ?", (str(match_id), clean_mid))
+            row = cur.fetchone()
+            if row and row[1]:
+                raw_val = row[1]
+                loaded = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
+                if isinstance(loaded, dict):
+                    state = loaded
+                    state["match_id"] = str(row[0])
+                    history_stack = []
+                    save_persisted_state()
+                    ws_manager.send_state(state)
+                    print(f"[switch_match] Switched to match {state['match_id']}", flush=True)
+                    return True
+        finally:
+            conn.close()
+    except Exception as ex:
+        print(f"[switch_match] Error: {ex}", flush=True)
+    return False
+
 if __name__ == "__main__":
     import os
+    import bottle
     
+    # Register static media route so Eel web client can load player/team media directly
+    @bottle.route('/media/<filepath:path>')
+    def serve_app_media(filepath):
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        media_dir = os.path.join(project_root, 'media')
+        return bottle.static_file(filepath, root=media_dir)
+
     ws_manager.start()
     try:
         web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
         eel.init(web_dir)
-        eel.start('index.html', size=(1200, 800), port=0)
+        port = int(os.environ.get("EEL_PORT", 49827))
+        try:
+            eel.start('index.html', size=(1200, 800), port=port)
+        except Exception:
+            eel.start('index.html', size=(1200, 800), port=0)
     finally:
         ws_manager.stop()
         ws_manager.join()

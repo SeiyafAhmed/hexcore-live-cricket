@@ -729,6 +729,7 @@ window.switchScorecardTab = function(tab) {
 
 async function refreshUI() {
     let state = await eel.get_state()();
+    window.currentMatchState = state;
     let meta = await populateImageCaches(state);
     
     if (!activeScorecardTab || state.innings !== lastSeenInnings) {
@@ -757,6 +758,20 @@ async function refreshUI() {
     if (elT1Name) elT1Name.innerText = leftName;
     let elT2Name = document.getElementById("team2-name");
     if (elT2Name) elT2Name.innerText = rightName;
+    
+    // Live Match ID badge update
+    let elMatchBadge = document.getElementById("current-match-id-badge");
+    if (elMatchBadge) {
+        if (state.match_id) {
+            elMatchBadge.innerText = String(state.match_id).slice(0, 8);
+            elMatchBadge.title = `Match ID: ${state.match_id} (Click to copy)`;
+            elMatchBadge.dataset.fullMid = state.match_id;
+        } else {
+            elMatchBadge.innerText = "LIVE";
+            elMatchBadge.title = "Live Match (Single Mode)";
+            elMatchBadge.dataset.fullMid = "";
+        }
+    }
     
     let tLeft = (meta.teams && Array.isArray(meta.teams)) ? meta.teams.find(t => t && t.name === leftName) : null;
     let elT1Img = document.getElementById("team1-img");
@@ -2052,6 +2067,62 @@ async function undo() {
     refreshUI();
 }
 
+async function swapStriker() {
+    try {
+        let state = await eel.get_state()();
+        if (!state || state.match_over || !state.striker || !state.non_striker) {
+            return;
+        }
+        let oldStrikerName = state.striker.name;
+        let oldNonStrikerName = state.non_striker.name;
+
+        let swapped = false;
+        if (window.eel && typeof eel.swap_striker === 'function') {
+            try {
+                let res = await eel.swap_striker()();
+                if (res === true) swapped = true;
+            } catch (ex) {
+                console.warn("eel.swap_striker call failed:", ex);
+            }
+        }
+
+        // Verify if backend state actually swapped
+        let checkState = await eel.get_state()();
+        if (checkState && checkState.striker && checkState.striker.name === oldNonStrikerName) {
+            swapped = true;
+        }
+
+        // If backend was running an older instance without native swap_striker:
+        if (!swapped) {
+            let temp = state.striker;
+            state.striker = state.non_striker;
+            state.non_striker = temp;
+            if (!state.batsmen_stats) state.batsmen_stats = {};
+            state.batsmen_stats[state.striker.name] = state.striker;
+            state.batsmen_stats[state.non_striker.name] = state.non_striker;
+            state.current_batters = [state.striker.name, state.non_striker.name];
+
+            try {
+                await fetch("http://127.0.0.1:8000/api/match-state/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(state)
+                });
+                if (window.eel && typeof eel.switch_match === 'function' && state.match_id) {
+                    await eel.switch_match(state.match_id)();
+                }
+            } catch (syncErr) {
+                console.warn("Fallback match-state sync failed:", syncErr);
+            }
+        }
+
+        await refreshUI();
+    } catch (err) {
+        console.error("Error in swapStriker:", err);
+    }
+}
+window.swapStriker = swapStriker;
+
 function showModal(html, widthClass = "w-[420px]") {
     let container = document.getElementById("modal-container");
     container.innerHTML = `
@@ -2410,6 +2481,18 @@ window.showMoreOptionsModal = async function() {
             <!-- Grid of Actions -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 
+                <!-- Swap Striker -->
+                <button onclick="swapStriker(); closeModal();" class="flex flex-col text-left p-4 bg-white hover:bg-amber-50/50 border border-slate-200 hover:border-amber-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99] cursor-pointer">
+                    <div class="flex items-center justify-between w-full">
+                        <span class="p-2 rounded-xl bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m7 16-4-4m0 0 4-4m-4 4h18m-4 4 4 4m0 0-4 4m4-4H3"/></svg>
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Immediate</span>
+                    </div>
+                    <div class="mt-3 font-bold text-slate-900 group-hover:text-amber-700 text-sm">Swap Striker</div>
+                    <div class="text-xs text-slate-500 mt-0.5">Switch striker & non-striker on crease without recording runs or a delivery</div>
+                </button>
+
                 <!-- Abandon Match -->
                 <button onclick="showConfirmAbandonModal()" class="flex flex-col text-left p-4 bg-white hover:bg-red-50/50 border border-slate-200 hover:border-red-300 rounded-2xl shadow-sm transition-all group active:scale-[0.99]">
                     <div class="flex items-center justify-between w-full">
@@ -5994,6 +6077,50 @@ function getRankBadgeHtml(rank) {
 }
 
 // -------------------------------------------------------------------------
+// Player Avatar & Media URL Resolvers
+// -------------------------------------------------------------------------
+function formatPlayerImageUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    let clean = url.trim();
+    if (!clean || clean === 'null' || clean === 'undefined') return '';
+    if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('data:')) {
+        return clean;
+    }
+    if (clean.startsWith('/media/')) {
+        return `http://127.0.0.1:8000${clean}`;
+    }
+    if (clean.startsWith('media/')) {
+        return `http://127.0.0.1:8000/${clean}`;
+    }
+    if (clean.startsWith('/')) {
+        return `http://127.0.0.1:8000${clean}`;
+    }
+    return `http://127.0.0.1:8000/media/${clean}`;
+}
+
+function renderPlayerAvatarHtml(imageUrl, playerName, teamColor = '#0f547c', containerClasses = 'w-12 h-12 rounded-xl text-base') {
+    let resolved = formatPlayerImageUrl(imageUrl);
+    let initials = formatInitials(playerName);
+    let fallbackHtml = `<div class="${containerClasses} flex items-center justify-center font-black text-white shadow-md shrink-0 select-none" style="background-color: ${teamColor}">${initials}</div>`;
+    
+    if (!resolved) {
+        return fallbackHtml;
+    }
+    
+    return `
+        <div class="${containerClasses} flex items-center justify-center font-black text-white shadow-md shrink-0 overflow-hidden relative" style="background-color: ${teamColor}">
+            <img src="${resolved}" 
+                 alt="${escapeHtml(playerName || '')}" 
+                 class="w-full h-full object-cover" 
+                 onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='flex';" />
+            <div class="w-full h-full hidden items-center justify-center font-black text-white text-inherit" style="background-color: ${teamColor}">
+                ${initials}
+            </div>
+        </div>
+    `;
+}
+
+// -------------------------------------------------------------------------
 // 1. MAJOR AWARDS CARDS (ORANGE CAP, PURPLE CAP, MVP, BOUNDARY KING)
 // -------------------------------------------------------------------------
 function renderMajorAwards(awards = {}, mvpList = []) {
@@ -6009,8 +6136,11 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                 <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
                     <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Runners Up:</span>
                     ${runnerUps.map(r => `
-                        <div class="flex items-center justify-between text-xs">
-                            <span class="text-slate-600 font-medium truncate max-w-[140px]">${escapeHtml(r.player_name)} (${escapeHtml(r.team_name)})</span>
+                        <div class="flex items-center justify-between text-xs py-0.5">
+                            <div class="flex items-center gap-2 truncate max-w-[170px]">
+                                ${renderPlayerAvatarHtml(r.player_image, r.player_name, r.team_color || teamCol, 'w-5 h-5 rounded-md text-[10px]')}
+                                <span class="text-slate-700 font-medium truncate">${escapeHtml(r.player_name)} <span class="text-slate-400">(${escapeHtml(r.team_name)})</span></span>
+                            </div>
                             <span class="font-bold text-slate-800">${r.runs} runs</span>
                         </div>
                     `).join("")}
@@ -6033,9 +6163,7 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                 <div class="p-5 flex flex-col justify-between flex-1">
                     <div>
                         <div class="flex items-center gap-3">
-                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
-                                ${oc.player_image ? `<img src="${oc.player_image}" class="w-full h-full object-cover">` : formatInitials(oc.player_name)}
-                            </div>
+                            ${renderPlayerAvatarHtml(oc.player_image, oc.player_name, teamCol, 'w-12 h-12 rounded-xl text-base')}
                             <div class="truncate">
                                 <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(oc.player_name)}</h4>
                                 <div class="flex items-center gap-1.5 mt-0.5">
@@ -6107,8 +6235,11 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                 <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
                     <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Runners Up:</span>
                     ${runnerUps.map(r => `
-                        <div class="flex items-center justify-between text-xs">
-                            <span class="text-slate-600 font-medium truncate max-w-[140px]">${escapeHtml(r.player_name)} (${escapeHtml(r.team_name)})</span>
+                        <div class="flex items-center justify-between text-xs py-0.5">
+                            <div class="flex items-center gap-2 truncate max-w-[170px]">
+                                ${renderPlayerAvatarHtml(r.player_image, r.player_name, r.team_color || teamCol, 'w-5 h-5 rounded-md text-[10px]')}
+                                <span class="text-slate-700 font-medium truncate">${escapeHtml(r.player_name)} <span class="text-slate-400">(${escapeHtml(r.team_name)})</span></span>
+                            </div>
                             <span class="font-bold text-slate-800">${r.wickets} wkts</span>
                         </div>
                     `).join("")}
@@ -6131,9 +6262,7 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                 <div class="p-5 flex flex-col justify-between flex-1">
                     <div>
                         <div class="flex items-center gap-3">
-                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
-                                ${pc.player_image ? `<img src="${pc.player_image}" class="w-full h-full object-cover">` : formatInitials(pc.player_name)}
-                            </div>
+                            ${renderPlayerAvatarHtml(pc.player_image, pc.player_name, teamCol, 'w-12 h-12 rounded-xl text-base')}
                             <div class="truncate">
                                 <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(pc.player_name)}</h4>
                                 <div class="flex items-center gap-1.5 mt-0.5">
@@ -6204,8 +6333,11 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                 <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
                     <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Runners Up:</span>
                     ${runnerUps.map(r => `
-                        <div class="flex items-center justify-between text-xs">
-                            <span class="text-slate-600 font-medium truncate max-w-[140px]">${escapeHtml(r.player_name)} (${escapeHtml(r.team_name)})</span>
+                        <div class="flex items-center justify-between text-xs py-0.5">
+                            <div class="flex items-center gap-2 truncate max-w-[170px]">
+                                ${renderPlayerAvatarHtml(r.player_image, r.player_name, r.team_color || teamCol, 'w-5 h-5 rounded-md text-[10px]')}
+                                <span class="text-slate-700 font-medium truncate">${escapeHtml(r.player_name)} <span class="text-slate-400">(${escapeHtml(r.team_name)})</span></span>
+                            </div>
                             <span class="font-bold text-slate-800">${r.mvp_points} pts</span>
                         </div>
                     `).join("")}
@@ -6228,9 +6360,7 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                 <div class="p-5 flex flex-col justify-between flex-1">
                     <div>
                         <div class="flex items-center gap-3">
-                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
-                                ${mvp.player_image ? `<img src="${mvp.player_image}" class="w-full h-full object-cover">` : formatInitials(mvp.player_name)}
-                            </div>
+                            ${renderPlayerAvatarHtml(mvp.player_image, mvp.player_name, teamCol, 'w-12 h-12 rounded-xl text-base')}
                             <div class="truncate">
                                 <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(mvp.player_name)}</h4>
                                 <div class="flex items-center gap-1.5 mt-0.5">
@@ -6309,9 +6439,7 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                 <div class="p-5 flex flex-col justify-between flex-1">
                     <div>
                         <div class="flex items-center gap-3">
-                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
-                                ${bk.player_image ? `<img src="${bk.player_image}" class="w-full h-full object-cover">` : formatInitials(bk.player_name)}
-                            </div>
+                            ${renderPlayerAvatarHtml(bk.player_image, bk.player_name, teamCol, 'w-12 h-12 rounded-xl text-base')}
                             <div class="truncate">
                                 <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(bk.player_name)}</h4>
                                 <div class="flex items-center gap-1.5 mt-0.5">
@@ -6335,7 +6463,7 @@ function renderMajorAwards(awards = {}, mvpList = []) {
                         ${max6 ? `
                             <div class="mt-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
                                 <div class="flex items-center gap-2 truncate">
-                                    <span class="text-base">🚀</span>
+                                    ${renderPlayerAvatarHtml(max6.player_image, max6.player_name, max6.team_color || teamCol, 'w-7 h-7 rounded-lg text-xs')}
                                     <div class="truncate">
                                         <div class="text-[10px] font-bold text-slate-400 uppercase">Maximum Sixes Award</div>
                                         <div class="font-bold text-slate-800 truncate">${escapeHtml(max6.player_name)}</div>
@@ -6382,9 +6510,7 @@ function renderBattingLeaderboards(batting = {}) {
                         <td class="py-3 px-4 text-center">${getRankBadgeHtml(b.rank)}</td>
                         <td class="py-3 px-4 font-bold text-slate-900">
                             <div class="flex items-center gap-2.5">
-                                <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden" style="background-color: ${col}">
-                                    ${b.player_image ? `<img src="${b.player_image}" class="w-full h-full object-cover">` : formatInitials(b.player_name)}
-                                </div>
+                                ${renderPlayerAvatarHtml(b.player_image, b.player_name, col, 'w-7 h-7 rounded-lg text-xs')}
                                 <span class="truncate max-w-[150px]">${escapeHtml(b.player_name)}</span>
                             </div>
                         </td>
@@ -6415,6 +6541,7 @@ function renderBattingLeaderboards(batting = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#3b82f6', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">vs ${escapeHtml(item.against_team)} (${item.balls}b)</div>
@@ -6429,6 +6556,7 @@ function renderBattingLeaderboards(batting = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#d97706', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">${item.runs} runs (SR: ${item.strike_rate})</div>
@@ -6445,6 +6573,7 @@ function renderBattingLeaderboards(batting = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#4f46e5', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">${item.runs} runs (${item.balls} balls)</div>
@@ -6459,6 +6588,7 @@ function renderBattingLeaderboards(batting = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#059669', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">${item.runs} runs in ${item.innings} inns</div>
@@ -6473,6 +6603,7 @@ function renderBattingLeaderboards(batting = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#e11d48', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">${escapeHtml(item.team_name)}</div>
@@ -6487,6 +6618,7 @@ function renderBattingLeaderboards(batting = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#0284c7', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">${escapeHtml(item.team_name)}</div>
@@ -6515,9 +6647,7 @@ function renderBowlingLeaderboards(bowling = {}) {
                         <td class="py-3 px-4 text-center">${getRankBadgeHtml(bw.rank)}</td>
                         <td class="py-3 px-4 font-bold text-slate-900">
                             <div class="flex items-center gap-2.5">
-                                <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden" style="background-color: ${col}">
-                                    ${bw.player_image ? `<img src="${bw.player_image}" class="w-full h-full object-cover">` : formatInitials(bw.player_name)}
-                                </div>
+                                ${renderPlayerAvatarHtml(bw.player_image, bw.player_name, col, 'w-7 h-7 rounded-lg text-xs')}
                                 <span class="truncate max-w-[150px]">${escapeHtml(bw.player_name)}</span>
                             </div>
                         </td>
@@ -6546,6 +6676,7 @@ function renderBowlingLeaderboards(bowling = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#7c3aed', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">vs ${escapeHtml(item.against_team)} (${item.overs_display} ov)</div>
@@ -6562,6 +6693,7 @@ function renderBowlingLeaderboards(bowling = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#059669', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">${item.overs_display} ov, ${item.runs_conceded}r</div>
@@ -6576,6 +6708,7 @@ function renderBowlingLeaderboards(bowling = {}) {
         <div class="flex items-center justify-between py-2 text-xs">
             <div class="flex items-center gap-2 truncate">
                 ${getRankBadgeHtml(item.rank)}
+                ${renderPlayerAvatarHtml(item.player_image, item.player_name, item.team_color || '#475569', 'w-6 h-6 rounded-md text-[10px]')}
                 <div class="truncate">
                     <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
                     <div class="text-[11px] text-slate-400">${escapeHtml(item.team_name)}</div>
@@ -6606,9 +6739,7 @@ function renderMvpStandings(mvpList = []) {
                 <td class="py-3 px-4 text-center">${getRankBadgeHtml(p.rank)}</td>
                 <td class="py-3 px-4 font-bold text-slate-900">
                     <div class="flex items-center gap-2.5">
-                        <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden" style="background-color: ${col}">
-                            ${p.player_image ? `<img src="${p.player_image}" class="w-full h-full object-cover">` : formatInitials(p.player_name)}
-                        </div>
+                        ${renderPlayerAvatarHtml(p.player_image, p.player_name, col, 'w-7 h-7 rounded-lg text-xs')}
                         <span class="truncate max-w-[150px]">${escapeHtml(p.player_name)}</span>
                     </div>
                 </td>
@@ -6644,7 +6775,12 @@ function renderFieldingLeaderboards(fielding = {}) {
             fTbody.innerHTML = topFielders.map(f => `
                 <tr class="hover:bg-slate-50 transition-colors">
                     <td class="py-2.5 px-3 text-center">${getRankBadgeHtml(f.rank)}</td>
-                    <td class="py-2.5 px-3 font-bold text-slate-800">${escapeHtml(f.player_name)}</td>
+                    <td class="py-2.5 px-3 font-bold text-slate-800">
+                        <div class="flex items-center gap-2">
+                            ${renderPlayerAvatarHtml(f.player_image, f.player_name, '#059669', 'w-6 h-6 rounded-md text-[10px]')}
+                            <span class="truncate">${escapeHtml(f.player_name)}</span>
+                        </div>
+                    </td>
                     <td class="py-2.5 px-3 text-xs text-slate-600">${escapeHtml(f.team_name)}</td>
                     <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${f.catches}</td>
                     <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${f.run_outs}</td>
@@ -6664,7 +6800,12 @@ function renderFieldingLeaderboards(fielding = {}) {
             kTbody.innerHTML = topKeepers.map(k => `
                 <tr class="hover:bg-slate-50 transition-colors">
                     <td class="py-2.5 px-3 text-center">${getRankBadgeHtml(k.rank)}</td>
-                    <td class="py-2.5 px-3 font-bold text-slate-800">${escapeHtml(k.player_name)}</td>
+                    <td class="py-2.5 px-3 font-bold text-slate-800">
+                        <div class="flex items-center gap-2">
+                            ${renderPlayerAvatarHtml(k.player_image, k.player_name, '#d97706', 'w-6 h-6 rounded-md text-[10px]')}
+                            <span class="truncate">${escapeHtml(k.player_name)}</span>
+                        </div>
+                    </td>
                     <td class="py-2.5 px-3 text-xs text-slate-600">${escapeHtml(k.team_name)}</td>
                     <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${k.catches}</td>
                     <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${k.stumpings}</td>
@@ -6731,3 +6872,170 @@ function renderMiniList(containerId, list = [], templateFn, emptyMsg = "No recor
     }
     el.innerHTML = list.map(templateFn).join("");
 }
+
+// =========================================================================
+// MULTI-MATCH CONTROLLER & OBS OVERLAY URL SCOPING
+// =========================================================================
+
+window.copyMatchId = function() {
+    let el = document.getElementById("current-match-id-badge");
+    let mid = el && el.dataset.fullMid ? el.dataset.fullMid : (window.currentMatchState && window.currentMatchState.match_id ? window.currentMatchState.match_id : "");
+    if (!mid) return;
+    navigator.clipboard.writeText(mid).then(() => {
+        let prev = el.innerText;
+        el.innerText = "COPIED";
+        setTimeout(() => { el.innerText = prev; }, 1500);
+    }).catch(() => {
+        prompt("Match ID:", mid);
+    });
+};
+
+window.copyOverlayUrl = function() {
+    let btn = document.getElementById("copy-overlay-btn-text");
+    let mid = window.currentMatchState && window.currentMatchState.match_id ? window.currentMatchState.match_id : "";
+    let url = mid ? `http://localhost:3000/?match_id=${mid}` : `http://localhost:3000/`;
+    
+    navigator.clipboard.writeText(url).then(() => {
+        if (btn) {
+            let prev = btn.innerText;
+            btn.innerText = "Copied!";
+            setTimeout(() => { btn.innerText = prev; }, 1800);
+        }
+    }).catch(() => {
+        prompt("Copy OBS Browser Source URL:", url);
+    });
+};
+
+window.copySpecificOverlayUrl = function(mid, btnEl) {
+    let url = mid ? `http://localhost:3000/?match_id=${mid}` : `http://localhost:3000/`;
+    navigator.clipboard.writeText(url).then(() => {
+        if (btnEl) {
+            let prev = btnEl.innerHTML;
+            btnEl.innerHTML = `<span class="text-emerald-300 font-bold">Copied!</span>`;
+            setTimeout(() => { btnEl.innerHTML = prev; }, 1800);
+        }
+    }).catch(() => {
+        prompt("Copy OBS Overlay URL for Match:", url);
+    });
+};
+
+window.openMultiMatchesModal = async function() {
+    let matches = [];
+    if (window.eel && typeof eel.get_active_matches === 'function') {
+        try {
+            matches = await eel.get_active_matches()();
+        } catch(e) {
+            console.warn("Failed to get active matches from Eel:", e);
+        }
+    }
+    
+    // If no matches returned from SQLite query, fall back to current state if active
+    let curMid = window.currentMatchState ? window.currentMatchState.match_id : null;
+    if ((!matches || matches.length === 0) && curMid) {
+        matches = [{
+            id: curMid,
+            team_1_name: window.currentMatchState.team_1_name || 'Team 1',
+            team_2_name: window.currentMatchState.team_2_name || 'Team 2',
+            score: `${window.currentMatchState.runs || 0}/${window.currentMatchState.wickets || 0}`,
+            overs: `${window.currentMatchState.overs_completed || 0}.${window.currentMatchState.balls_this_over || 0}`,
+            innings: window.currentMatchState.innings || 1,
+            is_current: true
+        }];
+    }
+    
+    let html = `
+        <div class="p-4 bg-slate-900 text-white font-bold text-base flex justify-between items-center border-b border-slate-800">
+            <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-indigo-600/30 text-indigo-400 flex items-center justify-center text-sm font-black border border-indigo-500/30">
+                    ⚡
+                </div>
+                <div>
+                    <div class="text-sm font-bold text-white">Live Matches Controller</div>
+                    <div class="text-[11px] text-slate-400 font-normal">Manage & broadcast multiple simultaneous matches</div>
+                </div>
+            </div>
+            <button onclick="closeModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center text-xl transition-colors cursor-pointer">&times;</button>
+        </div>
+        
+        <div class="p-5 bg-slate-50 overflow-y-auto max-h-[75vh] flex flex-col gap-3">
+            <div class="flex items-center justify-between pb-1">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Active Live Matches (${(matches && matches.length) || 0})</span>
+                <button onclick="prepareNewParallelMatch()" class="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all cursor-pointer">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                    <span>+ New Parallel Match</span>
+                </button>
+            </div>
+            
+            ${(!matches || matches.length === 0) ? `
+                <div class="text-center py-8 bg-white rounded-xl border border-dashed border-slate-300 p-6">
+                    <div class="text-sm font-bold text-slate-700">No active matches found</div>
+                    <div class="text-xs text-slate-400 mt-1">Start a match from the setup screen to begin scoring and broadcasting.</div>
+                </div>
+            ` : `
+                <div class="flex flex-col gap-2.5">
+                    ${matches.map(m => {
+                        let isCur = m.is_current || (curMid && (String(m.id).replace(/-/g, '') === String(curMid).replace(/-/g, '')));
+                        let obsUrl = `http://localhost:3000/?match_id=${m.id}`;
+                        return `
+                            <div class="p-4 rounded-xl border transition-all ${isCur ? 'bg-indigo-50/70 border-indigo-300 shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300'} flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div class="flex flex-col gap-1 min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        ${isCur ? `
+                                            <span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-600 text-white flex items-center gap-1">
+                                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span> Active Scoring
+                                            </span>
+                                        ` : `
+                                            <span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                LIVE
+                                            </span>
+                                        `}
+                                        <span class="font-mono text-xs text-slate-500 truncate" title="Match UUID: ${m.id}">ID: ${String(m.id).slice(0, 8)}...</span>
+                                    </div>
+                                    <div class="font-extrabold text-slate-800 text-sm mt-0.5">${escapeHtml(m.team_1_name)} vs ${escapeHtml(m.team_2_name)}</div>
+                                    <div class="text-xs font-semibold text-slate-500">
+                                        Score: <span class="font-bold text-slate-700">${m.score}</span> (${m.overs} ov) • Innings ${m.innings}
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 flex-shrink-0">
+                                    ${!isCur ? `
+                                        <button onclick="switchActiveMatch('${m.id}')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-all shadow-sm cursor-pointer">
+                                            Switch to Score
+                                        </button>
+                                    ` : `
+                                        <span class="text-xs font-bold text-indigo-700 bg-indigo-100/70 px-2.5 py-1 rounded-lg">Current</span>
+                                    `}
+                                    <button onclick="copySpecificOverlayUrl('${m.id}', this)" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition-all cursor-pointer" title="Copy OBS Browser Source URL: ${obsUrl}">
+                                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                        <span>Copy OBS URL</span>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join("")}
+                </div>
+            `}
+        </div>
+    `;
+    showModal(html, "w-[680px]");
+};
+
+window.switchActiveMatch = async function(mid) {
+    if (!mid) return;
+    if (window.eel && typeof eel.switch_match === 'function') {
+        let success = await eel.switch_match(mid)();
+        if (success) {
+            closeModal();
+            await refreshUI();
+            return;
+        }
+    }
+    alert("Could not switch to match " + mid);
+};
+
+window.prepareNewParallelMatch = function() {
+    closeModal();
+    document.getElementById("scoring-screen").classList.add("hidden");
+    document.getElementById("setup-screen").classList.remove("hidden");
+    initSetup();
+};
+
