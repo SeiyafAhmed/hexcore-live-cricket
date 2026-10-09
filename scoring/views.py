@@ -179,12 +179,13 @@ class TournamentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="leaderboards")
     def leaderboards(self, request, id=None):
         """
-        GET /api/tournaments/<id>/leaderboards/
-        Returns comprehensive tournament stats and awards.
+        GET /api/tournaments/<id>/leaderboards/?group=<group_id>
+        Returns comprehensive tournament leaderboards, caps, awards, and highlights.
         """
         tournament = self.get_object()
-        leaderboards_data = calculate_tournament_leaderboards(tournament.id)
-        return Response(leaderboards_data)
+        group_id = request.query_params.get("group")
+        data = calculate_tournament_leaderboards(tournament.id, group_id=group_id)
+        return Response(data)
 
 
 class GroupViewSet(viewsets.ModelViewSet):

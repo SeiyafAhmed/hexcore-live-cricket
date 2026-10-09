@@ -2,21 +2,24 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useMatchState, MatchState } from '@/hooks/useMatchState';
-import Scorebug from '@/components/Scorebug';
+import Scorebug, { TargetPosition } from '@/components/Scorebug';
 import BroadcastAlert, { AlertData } from '@/components/BroadcastAlert';
 import PlayerOutCard, { PlayerOutData } from '@/components/PlayerOutCard';
+import { TargetBannerVariant } from '@/components/TargetBanner';
 import { AnimatePresence } from 'framer-motion';
 
 const DEFAULT_PREVIEW_STATE: MatchState = {
-  runs: 95,
-  wickets: 3,
-  overs_completed: 4,
-  balls_this_over: 5,
-  max_overs: 5,
-  striker: { name: 'Mohamed Raazim', runs: 28, balls: 14, '4s': 3, '6s': 1 },
-  non_striker: { name: 'Mohamed Saad', runs: 16, balls: 9, '4s': 2, '6s': 0 },
-  bowler: { name: 'Inshaf Ahmed', runs: 18, overs: 1.5, wickets: 2 },
-  this_over: ['1', '0', '4', '6', 'Wd'],
+  runs: 12,
+  wickets: 2,
+  overs_completed: 1,
+  balls_this_over: 3,
+  max_overs: 6,
+  target: 172,
+  innings: 2,
+  striker: { name: 'Mohamed Raazim', runs: 8, balls: 5, '4s': 1, '6s': 0 },
+  non_striker: { name: 'Mohamed Saad', runs: 4, balls: 4, '4s': 0, '6s': 0 },
+  bowler: { name: 'Inshaf Ahmed', runs: 6, overs: 0.3, wickets: 1 },
+  this_over: ['1', '0', '4', 'W'],
   batting_team_name: 'Northern Navigator',
   bowling_team_name: 'Central Champions',
   batting_team_color: '#ff007f',
@@ -163,6 +166,9 @@ export default function OverlayPage() {
   const pendingOutCardRef = useRef<PlayerOutData | null>(null);
   const [customSpeed, setCustomSpeed] = useState<string | null>(null);
   const [showDevControls, setShowDevControls] = useState(false);
+  const [targetVariant, setTargetVariant] = useState<TargetBannerVariant>('modular');
+  const [targetPosition, setTargetPosition] = useState<TargetPosition>('bottom-left');
+  const [showTargetPreview, setShowTargetPreview] = useState(true);
   const prevStateRef = useRef<MatchState | null>(null);
   const lastHandledEventIdRef = useRef<string | null>(null);
 
@@ -421,9 +427,13 @@ export default function OverlayPage() {
   }
 
   const baseState = matchState || DEFAULT_PREVIEW_STATE;
-  const currentDisplayState = customSpeed !== null
+  let currentDisplayState = customSpeed !== null
     ? { ...baseState, ball_speed: customSpeed === 'OFF' ? null : customSpeed }
     : baseState;
+
+  if (!showTargetPreview && !matchState?.target) {
+    currentDisplayState = { ...currentDisplayState, target: null, innings: 1 };
+  }
 
   return (
     <main className="w-screen h-screen overflow-hidden relative select-none" suppressHydrationWarning>
@@ -449,6 +459,8 @@ export default function OverlayPage() {
         <Scorebug 
           state={currentDisplayState} 
           activeAlert={currentAlert?.type}
+          targetBannerVariant={targetVariant}
+          targetPosition={targetPosition}
         />
       </AnimatePresence>
 
@@ -490,14 +502,45 @@ export default function OverlayPage() {
             </button>
             <button
               onClick={() => {
+                const variants: TargetBannerVariant[] = ['modular', 'angular', 'docked'];
+                const nextIdx = (variants.indexOf(targetVariant) + 1) % variants.length;
+                setTargetVariant(variants[nextIdx]);
+              }}
+              className="px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-amber-500/20 to-amber-600/20 text-amber-300 border border-amber-400/30 hover:bg-amber-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+              title="Switch Target Banner Design Variant"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              🎨 Design: {targetVariant.toUpperCase()}
+            </button>
+            <button
+              onClick={() => {
+                const positions: TargetPosition[] = ['bottom-left', 'top-left', 'bottom-center'];
+                const nextIdx = (positions.indexOf(targetPosition) + 1) % positions.length;
+                setTargetPosition(positions[nextIdx]);
+              }}
+              className="px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 hover:bg-blue-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+              title="Switch Target Banner Position"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              📍 Pos: {targetPosition === 'bottom-left' ? 'LEFT CORNER' : targetPosition === 'top-left' ? 'TOP-LEFT' : 'CENTER'}
+            </button>
+            <button
+              onClick={() => setShowTargetPreview(!showTargetPreview)}
+              className="px-3 py-1 rounded-full text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-400/30 hover:bg-purple-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+              🎯 Chase: {showTargetPreview ? 'ON' : 'OFF'}
+            </button>
+            <button
+              onClick={() => {
                 const speeds = ['145.2', '152.8', 'OFF', null];
                 const cur = customSpeed;
                 const nextIdx = (speeds.indexOf(cur) + 1) % speeds.length;
                 setCustomSpeed(speeds[nextIdx]);
               }}
-              className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-400/30 hover:bg-amber-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+              className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 hover:bg-emerald-500/30 transition-all cursor-pointer flex items-center gap-1.5"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               ⚡ Speed: {customSpeed === 'OFF' ? 'None' : (customSpeed || '143.8')}
             </button>
             <button
@@ -510,10 +553,13 @@ export default function OverlayPage() {
         ) : (
           <button
             onClick={() => setShowDevControls(true)}
-            className="px-3 py-1 rounded-full text-[11px] font-semibold bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/10 backdrop-blur-md transition-all cursor-pointer shadow-md"
+            className="px-3 py-1 rounded-full text-[11px] font-semibold bg-white/5 hover:bg-white/15 text-white/60 hover:text-white border border-white/10 backdrop-blur-md transition-all cursor-pointer shadow-md flex items-center gap-2"
             title="Click or press 4, 6, W on keyboard to test animations"
           >
-            ⚡ Test Animations (4 / 6 / W)
+            <span>⚡ Controls & Designs</span>
+            <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 text-[10px] font-bold">
+              {targetVariant}
+            </span>
           </button>
         )}
       </div>

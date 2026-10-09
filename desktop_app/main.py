@@ -359,6 +359,12 @@ def get_group_standings(group_id):
     return api.get_group_standings(group_id)
 
 @eel.expose
+def get_tournament_leaderboards(tournament_id, group_id=None):
+    if group_id in ("", "all", "null", "None"):
+        group_id = None
+    return api.get_tournament_leaderboards(tournament_id, group_id)
+
+@eel.expose
 def console_log(msg):
     print("JS LOG:", msg, flush=True)
 

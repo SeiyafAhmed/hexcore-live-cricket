@@ -693,3 +693,32 @@ def get_group_standings(group_id):
         except Exception as inner_e:
             print(f"[api.get_group_standings] Direct services failed: {inner_e}")
             return []
+
+def get_tournament_leaderboards(tournament_id, group_id=None):
+    try:
+        url = f"{BASE_URL}/tournaments/{tournament_id}/leaderboards/"
+        params = {}
+        if group_id and group_id not in ("", "all", "null", "None"):
+            params["group"] = group_id
+        response = requests.get(url, params=params, timeout=4.0)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"[api.get_tournament_leaderboards] API fallback to services: {e}")
+        try:
+            import django
+            os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cricket_backend.settings")
+            django.setup()
+            from scoring.services import calculate_tournament_leaderboards
+            return calculate_tournament_leaderboards(tournament_id, group_id=group_id)
+        except Exception as inner_e:
+            print(f"[api.get_tournament_leaderboards] Direct services failed: {inner_e}")
+            return {
+                "error": str(inner_e),
+                "awards": {},
+                "batting": {},
+                "bowling": {},
+                "fielding": {},
+                "mvp_standings": [],
+                "team_highlights": {}
+            }

@@ -75,13 +75,20 @@ function BallChip({ ball }: { ball?: string }) {
 }
 
 import { AlertType } from './BroadcastAlert';
+import TargetBanner, { TargetBannerVariant } from './TargetBanner';
+
+export type TargetPosition = 'bottom-left' | 'top-left' | 'bottom-center';
 
 export default function Scorebug({ 
   state,
   activeAlert,
+  targetBannerVariant = 'modular',
+  targetPosition = 'bottom-left',
 }: { 
   state: MatchState;
   activeAlert?: AlertType | null;
+  targetBannerVariant?: TargetBannerVariant;
+  targetPosition?: TargetPosition;
 }) {
   // Teams info
   const battingTeamName = state.batting_team_name || state.team_1_name || 'Northern Navigator';
@@ -117,11 +124,6 @@ export default function Scorebug({
   // 2nd innings / Chase status
   const target = state.target;
   const isSecondInnings = (state.innings === 2) || (target != null && target > 0);
-  const runsNeeded = target != null ? Math.max(0, target - runs) : null;
-  const ballsRemaining = maxOvers ? Math.max(0, maxOvers * 6 - totalBalls) : null;
-  const reqRunRate = (runsNeeded != null && ballsRemaining != null && ballsRemaining > 0)
-    ? ((runsNeeded / ballsRemaining) * 6).toFixed(2)
-    : null;
 
   // Bowler
   const bowlerName = typeof state.bowler === 'object' && state.bowler ? state.bowler.name : (state.bowler || 'Inshaf Ahmed');
@@ -170,24 +172,31 @@ export default function Scorebug({
       transition={{ type: 'spring', damping: 25, stiffness: 140 }}
       className="fixed bottom-0 left-0 right-0 w-full flex flex-col items-center justify-end z-50 select-none"
     >
-      {/* Target Micro-Banner (If 2nd Innings) */}
+      {/* Target Broadcast Banner (If 2nd Innings) */}
       {isSecondInnings && target && (
-        <motion.div
-          initial={{ y: 10, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="mb-2 px-7 py-1.5 rounded-full bg-slate-900/95 backdrop-blur-md border border-white/10 text-sm font-semibold tracking-wider text-amber-300 shadow-xl flex items-center gap-3"
-        >
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-          <span>TARGET: <strong className="text-white text-base">{target}</strong></span>
-          <span className="text-white/30">•</span>
-          <span>NEED <strong className="text-white text-base">{runsNeeded}</strong> OFF <strong className="text-white text-base">{ballsRemaining}</strong> BALLS</span>
-          {reqRunRate && (
-            <>
-              <span className="text-white/30">•</span>
-              <span>REQ RR: <strong className="text-amber-200 text-base">{reqRunRate}</strong></span>
-            </>
-          )}
-        </motion.div>
+        targetPosition === 'top-left' ? (
+          <div className="fixed top-6 left-6 z-50">
+            <TargetBanner
+              target={target}
+              runs={runs}
+              maxOvers={maxOvers}
+              totalBalls={totalBalls}
+              battingColor={battingColor}
+              variant={targetBannerVariant}
+            />
+          </div>
+        ) : (
+          <div className={`w-full flex ${targetPosition === 'bottom-center' ? 'justify-center' : 'justify-start pl-4 md:pl-6 mb-3.5'}`}>
+            <TargetBanner
+              target={target}
+              runs={runs}
+              maxOvers={maxOvers}
+              totalBalls={totalBalls}
+              battingColor={battingColor}
+              variant={targetBannerVariant}
+            />
+          </div>
+        )
       )}
 
       {/* Full Screen Width Broadcast Bar */}

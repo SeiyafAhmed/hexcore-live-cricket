@@ -184,6 +184,24 @@ const TournamentAPI = {
         let res = await fetch(`${TOURNAMENT_API_BASE}/groups/${groupId}/standings/`);
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         return await res.json();
+    },
+
+    async getTournamentLeaderboards(tournamentId, groupId = null) {
+        if (window.eel && typeof eel.get_tournament_leaderboards === 'function') {
+            try {
+                let res = await eel.get_tournament_leaderboards(tournamentId, groupId)();
+                if (res !== undefined && res !== null) return res;
+            } catch(e) {
+                console.warn("Eel get_tournament_leaderboards failed, using REST fallback:", e);
+            }
+        }
+        let url = `${TOURNAMENT_API_BASE}/tournaments/${tournamentId}/leaderboards/`;
+        if (groupId && groupId !== 'all' && groupId !== 'null' && groupId !== 'None') {
+            url += `?group=${encodeURIComponent(groupId)}`;
+        }
+        let res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return await res.json();
     }
 };
 
@@ -200,7 +218,8 @@ const TournamentAPI = {
         update_group: (gId, n) => () => TournamentAPI.updateGroup(gId, n),
         delete_group: (gId) => () => TournamentAPI.deleteGroup(gId),
         assign_teams_to_group: (gId, teams) => () => TournamentAPI.assignTeamsToGroup(gId, teams),
-        get_group_standings: (gId) => () => TournamentAPI.getGroupStandings(gId)
+        get_group_standings: (gId) => () => TournamentAPI.getGroupStandings(gId),
+        get_tournament_leaderboards: (tId, gId) => () => TournamentAPI.getTournamentLeaderboards(tId, gId)
     };
 
     for (const [key, fn] of Object.entries(methods)) {
@@ -210,6 +229,75 @@ const TournamentAPI = {
     }
 })();
 
+
+let currentSetupGroups = [];
+
+function populateSetupTeamSelects(teamsList) {
+    let battingSelect = document.getElementById("setup-batting-team");
+    let bowlingSelect = document.getElementById("setup-bowling-team");
+    if (!battingSelect || !bowlingSelect) return;
+
+    let currentBat = battingSelect.value;
+    let currentBowl = bowlingSelect.value;
+
+    battingSelect.innerHTML = "";
+    bowlingSelect.innerHTML = "";
+
+    if (!teamsList || teamsList.length === 0) {
+        let opt1 = document.createElement("option");
+        opt1.value = "";
+        opt1.text = "-- No Teams In Selected Group --";
+        battingSelect.add(opt1);
+
+        let opt2 = document.createElement("option");
+        opt2.value = "";
+        opt2.text = "-- No Teams In Selected Group --";
+        bowlingSelect.add(opt2);
+
+        let str = document.getElementById("setup-striker");
+        let nstr = document.getElementById("setup-nonstriker");
+        let bowl = document.getElementById("setup-bowler");
+        if (str) str.innerHTML = `<option value="">-- No Players --</option>`;
+        if (nstr) nstr.innerHTML = `<option value="">-- No Players --</option>`;
+        if (bowl) bowl.innerHTML = `<option value="">-- No Players --</option>`;
+        return;
+    }
+
+    teamsList.forEach(t => {
+        let opt1 = document.createElement("option");
+        opt1.value = t.id;
+        opt1.text = t.name;
+        battingSelect.add(opt1);
+
+        let opt2 = document.createElement("option");
+        opt2.value = t.id;
+        opt2.text = t.name;
+        bowlingSelect.add(opt2);
+    });
+
+    const normalize = (id) => String(id || "").toLowerCase().replace(/-/g, "");
+    let canKeepBat = teamsList.some(t => normalize(t.id) === normalize(currentBat));
+    let canKeepBowl = teamsList.some(t => normalize(t.id) === normalize(currentBowl));
+
+    if (canKeepBat) {
+        battingSelect.value = currentBat;
+    } else {
+        battingSelect.selectedIndex = 0;
+    }
+
+    if (canKeepBowl && (teamsList.length === 1 || normalize(currentBowl) !== normalize(battingSelect.value))) {
+        bowlingSelect.value = currentBowl;
+    } else {
+        if (teamsList.length > 1) {
+            bowlingSelect.selectedIndex = (battingSelect.selectedIndex === 0) ? 1 : 0;
+        } else {
+            bowlingSelect.selectedIndex = 0;
+        }
+    }
+
+    if (typeof battingSelect.onchange === 'function') battingSelect.onchange();
+    if (typeof bowlingSelect.onchange === 'function') bowlingSelect.onchange();
+}
 
 async function initSetup() {
     try {
@@ -222,55 +310,51 @@ async function initSetup() {
         
         let battingSelect = document.getElementById("setup-batting-team");
         let bowlingSelect = document.getElementById("setup-bowling-team");
-        if (battingSelect && bowlingSelect) {
-            let currentBat = battingSelect.value;
-            let currentBowl = bowlingSelect.value;
-            battingSelect.innerHTML = "";
-            bowlingSelect.innerHTML = "";
-            
-            teams.forEach(t => {
-                let opt1 = document.createElement("option");
-                opt1.value = t.id;
-                opt1.text = t.name;
-                battingSelect.add(opt1);
-                
-                let opt2 = document.createElement("option");
-                opt2.value = t.id;
-                opt2.text = t.name;
-                bowlingSelect.add(opt2);
-            });
 
-            if (currentBat && teams.some(t => t.id === currentBat)) battingSelect.value = currentBat;
-            if (currentBowl && teams.some(t => t.id === currentBowl)) bowlingSelect.value = currentBowl;
+        if (battingSelect) {
+            battingSelect.onchange = async () => {
+                try {
+                    if (!battingSelect.value) {
+                        let str = document.getElementById("setup-striker");
+                        let nstr = document.getElementById("setup-nonstriker");
+                        if (str) str.innerHTML = `<option value="">-- No Players --</option>`;
+                        if (nstr) nstr.innerHTML = `<option value="">-- No Players --</option>`;
+                        return;
+                    }
+                    let players = await eel.get_players(battingSelect.value)();
+                    if(window.eel && eel.console_log) eel.console_log("Batting players loaded: " + JSON.stringify(players))();
+                    let str = document.getElementById("setup-striker");
+                    let nstr = document.getElementById("setup-nonstriker");
+                    if (str) str.innerHTML = "";
+                    if (nstr) nstr.innerHTML = "";
+                    players.forEach(p => {
+                        let name = p.first_name + " " + p.last_name;
+                        if (str) str.add(new Option(name, name));
+                        if (nstr) nstr.add(new Option(name, name));
+                    });
+                } catch(e) { if(window.eel && eel.console_log) eel.console_log("Error loading batting players: " + e); }
+            };
         }
-
-        battingSelect.onchange = async () => {
-            try {
-                let players = await eel.get_players(battingSelect.value)();
-                if(window.eel && eel.console_log) eel.console_log("Batting players loaded: " + JSON.stringify(players))();
-                let str = document.getElementById("setup-striker");
-                let nstr = document.getElementById("setup-nonstriker");
-                str.innerHTML = ""; nstr.innerHTML = "";
-                players.forEach(p => {
-                    let name = p.first_name + " " + p.last_name;
-                    str.add(new Option(name, name));
-                    nstr.add(new Option(name, name));
-                });
-            } catch(e) { if(window.eel && eel.console_log) eel.console_log("Error loading batting players: " + e); }
-        };
         
-        bowlingSelect.onchange = async () => {
-            try {
-                let players = await eel.get_players(bowlingSelect.value)();
-                if(window.eel && eel.console_log) eel.console_log("Bowling players loaded: " + JSON.stringify(players))();
-                let bowl = document.getElementById("setup-bowler");
-                bowl.innerHTML = "";
-                players.forEach(p => {
-                    let name = p.first_name + " " + p.last_name;
-                    bowl.add(new Option(name, name));
-                });
-            } catch(e) { if(window.eel && eel.console_log) eel.console_log("Error loading bowling players: " + e); }
-        };
+        if (bowlingSelect) {
+            bowlingSelect.onchange = async () => {
+                try {
+                    if (!bowlingSelect.value) {
+                        let bowl = document.getElementById("setup-bowler");
+                        if (bowl) bowl.innerHTML = `<option value="">-- No Bowlers --</option>`;
+                        return;
+                    }
+                    let players = await eel.get_players(bowlingSelect.value)();
+                    if(window.eel && eel.console_log) eel.console_log("Bowling players loaded: " + JSON.stringify(players))();
+                    let bowl = document.getElementById("setup-bowler");
+                    if (bowl) bowl.innerHTML = "";
+                    players.forEach(p => {
+                        let name = p.first_name + " " + p.last_name;
+                        if (bowl) bowl.add(new Option(name, name));
+                    });
+                } catch(e) { if(window.eel && eel.console_log) eel.console_log("Error loading bowling players: " + e); }
+            };
+        }
         
         let tournSelect = document.getElementById("setup-tournament");
         if (tournSelect) {
@@ -290,15 +374,107 @@ async function initSetup() {
             }
         }
 
-        if(teams.length > 0) {
-            battingSelect.onchange();
-            bowlingSelect.onchange();
+        // Initialize team dropdowns according to current tournament and group selection
+        if (tournSelect && tournSelect.value) {
+            await window.onSetupTournamentChange();
+        } else {
+            populateSetupTeamSelects(allTeamsData);
         }
     } catch(e) {
         if(window.eel && eel.console_log) eel.console_log("Failed to load teams: " + e);
         alert("Error loading teams: " + e.message);
     }
 }
+
+window.onSetupGroupChange = async function() {
+    let tournSelect = document.getElementById("setup-tournament");
+    let grpSelect = document.getElementById("setup-group");
+    let grpId = grpSelect ? grpSelect.value : "";
+    let tournId = tournSelect ? tournSelect.value : "";
+
+    if (!allTeamsData || allTeamsData.length === 0) {
+        try {
+            allTeamsData = await eel.get_teams()();
+        } catch(e) {
+            allTeamsData = [];
+        }
+    }
+
+    const normalize = (id) => String(id || "").toLowerCase().replace(/-/g, "");
+    let teamsToShow = [];
+
+    if (tournId && grpId && currentSetupGroups && currentSetupGroups.length > 0) {
+        // Group is selected: list ONLY teams that belong to this group
+        let grp = currentSetupGroups.find(g => normalize(g.id) === normalize(grpId));
+        if (grp) {
+            let groupTeamIds = new Set();
+            if (Array.isArray(grp.teams)) {
+                grp.teams.forEach(t => {
+                    let tid = (typeof t === 'object' && t !== null) ? t.id : t;
+                    if (tid) groupTeamIds.add(normalize(tid));
+                });
+            }
+            if (Array.isArray(grp.team_details)) {
+                grp.team_details.forEach(t => {
+                    if (t && t.id) groupTeamIds.add(normalize(t.id));
+                });
+            }
+
+            teamsToShow = (allTeamsData || []).filter(t => groupTeamIds.has(normalize(t.id)));
+
+            if (Array.isArray(grp.team_details)) {
+                grp.team_details.forEach(dt => {
+                    if (dt && dt.id && !teamsToShow.some(x => normalize(x.id) === normalize(dt.id))) {
+                        teamsToShow.push(dt);
+                    }
+                });
+            }
+        }
+    } else if (tournId && !grpId && currentSetupGroups && currentSetupGroups.length > 0) {
+        // Tournament selected, but No Group selected: list all teams in this tournament's groups
+        let tournTeamIds = new Set();
+        currentSetupGroups.forEach(grp => {
+            if (Array.isArray(grp.teams)) {
+                grp.teams.forEach(t => {
+                    let tid = (typeof t === 'object' && t !== null) ? t.id : t;
+                    if (tid) tournTeamIds.add(normalize(tid));
+                });
+            }
+            if (Array.isArray(grp.team_details)) {
+                grp.team_details.forEach(t => {
+                    if (t && t.id) tournTeamIds.add(normalize(t.id));
+                });
+            }
+        });
+
+        if (tournTeamIds.size > 0) {
+            teamsToShow = (allTeamsData || []).filter(t => tournTeamIds.has(normalize(t.id)));
+        } else {
+            teamsToShow = allTeamsData || [];
+        }
+    } else {
+        // Standalone match: list all teams
+        teamsToShow = allTeamsData || [];
+    }
+
+    populateSetupTeamSelects(teamsToShow);
+
+    let batBadge = document.getElementById("setup-batting-group-badge");
+    let bowlBadge = document.getElementById("setup-bowling-group-badge");
+    if (batBadge && bowlBadge) {
+        let activeGrp = (tournId && grpId && currentSetupGroups) ? currentSetupGroups.find(g => normalize(g.id) === normalize(grpId)) : null;
+        if (activeGrp) {
+            let badgeText = `${activeGrp.name} (${teamsToShow.length} teams)`;
+            batBadge.innerText = badgeText;
+            bowlBadge.innerText = badgeText;
+            batBadge.classList.remove("hidden");
+            bowlBadge.classList.remove("hidden");
+        } else {
+            batBadge.classList.add("hidden");
+            bowlBadge.classList.add("hidden");
+        }
+    }
+};
 
 window.onSetupTournamentChange = async function() {
     let tournSelect = document.getElementById("setup-tournament");
@@ -307,84 +483,55 @@ window.onSetupTournamentChange = async function() {
     if (!tournSelect || !grpSelect) return;
     let tournId = tournSelect.value;
     grpSelect.innerHTML = `<option value="">-- No Group / Standalone --</option>`;
-    
-    if (tournId) {
-        try {
-            let tourns = await TournamentAPI.getTournaments();
-            let selectedT = (tourns || []).find(t => t.id == tournId);
-            if (selectedT && selectedT.max_overs && oversInp) {
-                oversInp.value = selectedT.max_overs;
-            }
+    currentSetupGroups = [];
 
-            let groups = await TournamentAPI.getGroups(tournId);
-            (groups || []).forEach(g => {
-                let opt = document.createElement("option");
-                opt.value = g.id;
-                opt.text = g.name;
-                grpSelect.add(opt);
-            });
-        } catch(e) {
-            console.error("Error updating setup groups:", e);
-        }
+    if (!tournId) {
+        await window.onSetupGroupChange();
+        return;
     }
-    
-    if (window.onSetupGroupChange) {
+
+    try {
+        let tourns = await TournamentAPI.getTournaments();
+        let selectedT = (tourns || []).find(t => t.id === tournId);
+        if (selectedT && selectedT.max_overs && oversInp) {
+            oversInp.value = selectedT.max_overs;
+        }
+
+        let groups = await TournamentAPI.getGroups(tournId);
+        currentSetupGroups = groups || [];
+        (groups || []).forEach(g => {
+            let opt = document.createElement("option");
+            opt.value = g.id;
+            let teamCnt = g.team_count !== undefined ? g.team_count : (Array.isArray(g.teams) ? g.teams.length : 0);
+            opt.text = `${g.name} (${teamCnt} Teams)`;
+            grpSelect.add(opt);
+        });
+
+        await window.onSetupGroupChange();
+    } catch(e) {
+        console.error("Error updating setup groups:", e);
         await window.onSetupGroupChange();
     }
-};
-
-window.onSetupGroupChange = async function() {
-    let grpSelect = document.getElementById("setup-group");
-    let tournSelect = document.getElementById("setup-tournament");
-    let battingSelect = document.getElementById("setup-batting-team");
-    let bowlingSelect = document.getElementById("setup-bowling-team");
-
-    if (!battingSelect || !bowlingSelect) return;
-    
-    let currentBat = battingSelect.value;
-    let currentBowl = bowlingSelect.value;
-    
-    let teamsToLoad = allTeamsData; // Default to all teams
-
-    if (grpSelect && grpSelect.value && tournSelect && tournSelect.value) {
-        try {
-            let groups = await TournamentAPI.getGroups(tournSelect.value);
-            let selectedGroup = groups.find(g => g.id == grpSelect.value);
-            if (selectedGroup && selectedGroup.teams) {
-                teamsToLoad = allTeamsData.filter(t => selectedGroup.teams.includes(t.id));
-            }
-        } catch(e) {
-            console.error("Error filtering teams by group:", e);
-        }
-    }
-
-    battingSelect.innerHTML = "";
-    bowlingSelect.innerHTML = "";
-
-    teamsToLoad.forEach(t => {
-        let opt1 = document.createElement("option");
-        opt1.value = t.id;
-        opt1.text = t.name;
-        battingSelect.add(opt1);
-        
-        let opt2 = document.createElement("option");
-        opt2.value = t.id;
-        opt2.text = t.name;
-        bowlingSelect.add(opt2);
-    });
-
-    if (currentBat && teamsToLoad.some(t => t.id == currentBat)) battingSelect.value = currentBat;
-    if (currentBowl && teamsToLoad.some(t => t.id == currentBowl)) bowlingSelect.value = currentBowl;
-
-    if (battingSelect.onchange) battingSelect.onchange();
-    if (bowlingSelect.onchange) bowlingSelect.onchange();
 };
 
 async function startMatch() {
     let batId = document.getElementById("setup-batting-team").value;
     let bowlId = document.getElementById("setup-bowling-team").value;
-    let batName = document.getElementById("setup-batting-team").options[document.getElementById("setup-batting-team").selectedIndex].text;
-    let bowlName = document.getElementById("setup-bowling-team").options[document.getElementById("setup-bowling-team").selectedIndex].text;
+
+    if (!batId || !bowlId) {
+        alert("Please select both Batting and Bowling teams before starting the match!");
+        return;
+    }
+
+    if (batId === bowlId) {
+        alert("Batting Team and Bowling Team cannot be the same!");
+        return;
+    }
+
+    let batSelectEl = document.getElementById("setup-batting-team");
+    let bowlSelectEl = document.getElementById("setup-bowling-team");
+    let batName = batSelectEl.options[batSelectEl.selectedIndex].text;
+    let bowlName = bowlSelectEl.options[bowlSelectEl.selectedIndex].text;
     
     let striker = document.getElementById("setup-striker").value;
     let nonstriker = document.getElementById("setup-nonstriker").value;
@@ -408,6 +555,7 @@ async function startMatch() {
     
     refreshUI();
 }
+
 
 // ---------------------------------------------------------------------------
 // Color & Theme Utilities
@@ -5661,160 +5809,925 @@ window.submitAssignTeams = async function(e) {
     }
 };
 
-
 // =========================================================================
-// TOURNAMENT STATS & LEADERBOARDS
+// TOURNAMENT STATS, LEADERBOARDS & AWARD TRACKING SYSTEM
 // =========================================================================
 
-window.loadStatsView = async function() {
-    try {
-        let tourns = await TournamentAPI.getTournaments();
-        let tournSelect = document.getElementById("stats-tournament-select");
-        if (tournSelect) {
-            let curVal = tournSelect.value;
-            tournSelect.innerHTML = `<option value="">-- Select a Tournament --</option>`;
-            (tourns || []).forEach(t => {
-                let opt = document.createElement("option");
-                opt.value = t.id;
-                opt.text = `${t.name} (${t.season || 'N/A'})`;
-                tournSelect.add(opt);
-            });
-            if (curVal) tournSelect.value = curVal;
-            else if (tourns && tourns.length > 0) {
-                tournSelect.value = tourns[0].id;
+let selectedStatsTournamentId = null;
+let selectedStatsGroupId = "all";
+let currentStatsLeaderboards = null;
+let currentStatsSubTab = "batting";
+
+window.switchStatsSubTab = function(subTabName) {
+    currentStatsSubTab = subTabName;
+    const subTabs = ['batting', 'bowling', 'mvp', 'fielding', 'teams'];
+    subTabs.forEach(tab => {
+        const btn = document.getElementById(`stats-subtab-${tab}`);
+        const sec = document.getElementById(`stats-section-${tab}`);
+        if (btn) {
+            if (tab === subTabName) {
+                btn.className = "px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white shadow-sm flex items-center gap-1.5 transition-all";
+            } else {
+                btn.className = "px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 flex items-center gap-1.5 transition-all";
             }
         }
-        await refreshLeaderboards();
-    } catch(e) {
-        console.error("Error loading stats view:", e);
+        if (sec) {
+            if (tab === subTabName) {
+                sec.classList.remove("hidden");
+            } else {
+                sec.classList.add("hidden");
+            }
+        }
+    });
+};
+
+window.loadStatsView = async function(tournamentId = null, groupId = null) {
+    try {
+        let emptyEl = document.getElementById("stats-empty-state");
+        let contentEl = document.getElementById("stats-main-content");
+        let tournSelect = document.getElementById("stats-tournament-select");
+
+        let tourns = await TournamentAPI.getTournaments();
+        allTournamentsData = tourns || [];
+        updateSidebarBadges();
+
+        if (allTournamentsData.length === 0) {
+            if (emptyEl) emptyEl.classList.remove("hidden");
+            if (contentEl) contentEl.classList.add("hidden");
+            selectedStatsTournamentId = null;
+            return;
+        }
+
+        if (emptyEl) emptyEl.classList.add("hidden");
+        if (contentEl) contentEl.classList.remove("hidden");
+
+        // Populate tournament select
+        if (tournSelect) {
+            tournSelect.innerHTML = allTournamentsData.map(t => {
+                let seasonLabel = t.season ? `(${t.season})` : `(${t.max_overs || 20} Ov)`;
+                return `<option value="${t.id}">${escapeHtml(t.name)} ${seasonLabel}</option>`;
+            }).join("");
+        }
+
+        if (tournamentId && allTournamentsData.some(t => t.id === tournamentId)) {
+            selectedStatsTournamentId = tournamentId;
+        } else if (selectedTournamentId && allTournamentsData.some(t => t.id === selectedTournamentId)) {
+            selectedStatsTournamentId = selectedTournamentId;
+        } else if (!selectedStatsTournamentId || !allTournamentsData.some(t => t.id === selectedStatsTournamentId)) {
+            selectedStatsTournamentId = allTournamentsData[0].id;
+        }
+
+        if (tournSelect) tournSelect.value = selectedStatsTournamentId;
+
+        // Populate group select
+        await populateStatsGroupSelect(selectedStatsTournamentId, groupId);
+
+        // Load leaderboards payload
+        await loadLeaderboardsData();
+
+    } catch (err) {
+        console.error("Error in loadStatsView:", err);
+        showToast("Error loading tournament stats: " + err.message, "error");
     }
 };
 
-window.onStatsTournamentSelected = async function(val) {
-    await refreshLeaderboards();
+async function populateStatsGroupSelect(tournId, preferredGroupId = null) {
+    let grpSelect = document.getElementById("stats-group-select");
+    if (!grpSelect) return;
+
+    try {
+        let groups = await TournamentAPI.getGroups(tournId);
+        let grpHtml = `<option value="all">Overall Tournament (All Groups)</option>`;
+        if (groups && groups.length > 0) {
+            grpHtml += groups.map(g => `<option value="${g.id}">Group: ${escapeHtml(g.name)}</option>`).join("");
+        }
+        grpSelect.innerHTML = grpHtml;
+
+        if (preferredGroupId && (preferredGroupId === 'all' || (groups && groups.some(g => g.id === preferredGroupId)))) {
+            selectedStatsGroupId = preferredGroupId;
+        } else {
+            selectedStatsGroupId = "all";
+        }
+        grpSelect.value = selectedStatsGroupId;
+    } catch(err) {
+        console.error("Error fetching groups for stats select:", err);
+        grpSelect.innerHTML = `<option value="all">Overall Tournament (All Groups)</option>`;
+        selectedStatsGroupId = "all";
+    }
+}
+
+window.onStatsTournamentChange = async function(tournId) {
+    if (!tournId) return;
+    selectedStatsTournamentId = tournId;
+    await populateStatsGroupSelect(tournId, "all");
+    await loadLeaderboardsData();
 };
 
-window.refreshLeaderboards = async function() {
-    let tournSelect = document.getElementById("stats-tournament-select");
-    let tournId = tournSelect ? tournSelect.value : null;
-    
-    if (!tournId) {
-        // Clear tables
-        let tbodies = ['stats-mvp', 'stats-top-scorers', 'stats-top-wickets', 'stats-highest-score', 'stats-most-6s', 'stats-most-4s', 'stats-best-figures'];
-        tbodies.forEach(id => {
-            let el = document.getElementById(id);
-            if (el) el.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-slate-400 text-xs italic">Select a tournament to view stats</td></tr>`;
-        });
+window.onStatsGroupChange = async function(grpId) {
+    selectedStatsGroupId = grpId || "all";
+    await loadLeaderboardsData();
+};
+
+async function loadLeaderboardsData() {
+    if (!selectedStatsTournamentId) return;
+
+    // Show loading state in tables
+    const tbodyIds = [
+        "leaderboard-top-scorers-tbody",
+        "leaderboard-top-bowlers-tbody",
+        "leaderboard-mvp-tbody",
+        "leaderboard-top-fielders-tbody",
+        "leaderboard-top-keepers-tbody"
+    ];
+    tbodyIds.forEach(id => {
+        let el = document.getElementById(id);
+        if (el) {
+            el.innerHTML = `<tr><td colspan="12" class="py-8 text-center text-xs text-slate-400 font-semibold"><div class="inline-block w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mr-2"></div>Calculating official leaderboards...</td></tr>`;
+        }
+    });
+
+    try {
+        let data = await TournamentAPI.getTournamentLeaderboards(selectedStatsTournamentId, selectedStatsGroupId);
+        currentStatsLeaderboards = data;
+
+        // Update meta badges
+        let matchesVal = document.getElementById("stats-meta-matches-val");
+        if (matchesVal) matchesVal.innerText = `${data.matches_count || 0} Matches Recorded`;
+
+        let seasonVal = document.getElementById("stats-meta-season-val");
+        let tournObj = allTournamentsData.find(t => t.id === selectedStatsTournamentId);
+        if (seasonVal) seasonVal.innerText = (tournObj && tournObj.season) ? `Season: ${tournObj.season}` : `Max: ${tournObj ? tournObj.max_overs : 20} Overs`;
+
+        let scopeVal = document.getElementById("stats-meta-scope-val");
+        if (scopeVal) {
+            if (data.filter_group) {
+                scopeVal.innerText = `Filtered: ${data.filter_group.name}`;
+            } else {
+                scopeVal.innerText = `Overall Tournament`;
+            }
+        }
+
+        // Render all sections
+        renderMajorAwards(data.awards, data.mvp_standings);
+        renderBattingLeaderboards(data.batting);
+        renderBowlingLeaderboards(data.bowling);
+        renderMvpStandings(data.mvp_standings);
+        renderFieldingLeaderboards(data.fielding);
+        renderTeamHighlights(data.team_highlights);
+
+    } catch (err) {
+        console.error("Error loading leaderboards data:", err);
+        showToast("Failed to load leaderboards: " + err.message, "error");
+    }
+}
+
+function getRankBadgeHtml(rank) {
+    if (rank === 1) {
+        return `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-500 text-slate-950 font-black text-xs shadow-sm">1</span>`;
+    } else if (rank === 2) {
+        return `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-300 text-slate-800 font-black text-xs shadow-sm">2</span>`;
+    } else if (rank === 3) {
+        return `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-700 text-white font-black text-xs shadow-sm">3</span>`;
+    } else {
+        return `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-600 font-bold text-xs">${rank}</span>`;
+    }
+}
+
+// -------------------------------------------------------------------------
+// 1. MAJOR AWARDS CARDS (ORANGE CAP, PURPLE CAP, MVP, BOUNDARY KING)
+// -------------------------------------------------------------------------
+function renderMajorAwards(awards = {}, mvpList = []) {
+    // 1. Orange Cap Card
+    const ocEl = document.getElementById("award-card-orange-cap");
+    const oc = awards ? awards.orange_cap : null;
+    if (ocEl) {
+        if (oc) {
+            let teamCol = oc.team_color || "#d97706";
+            let topBatters = currentStatsLeaderboards?.batting?.top_scorers || [];
+            let runnerUps = topBatters.slice(1, 3);
+            let runnerUpsHtml = runnerUps.length > 0 ? `
+                <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Runners Up:</span>
+                    ${runnerUps.map(r => `
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="text-slate-600 font-medium truncate max-w-[140px]">${escapeHtml(r.player_name)} (${escapeHtml(r.team_name)})</span>
+                            <span class="font-bold text-slate-800">${r.runs} runs</span>
+                        </div>
+                    `).join("")}
+                </div>
+            ` : "";
+
+            ocEl.innerHTML = `
+                <div class="bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 p-4 text-white">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">🧢</span>
+                            <div>
+                                <h3 class="text-xs font-black uppercase tracking-wider text-amber-100">Orange Cap</h3>
+                                <div class="text-[11px] text-white/80 font-medium">Leading Run Scorer</div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/20 text-white uppercase tracking-wider border border-white/30">#1 Batter</span>
+                    </div>
+                </div>
+                <div class="p-5 flex flex-col justify-between flex-1">
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
+                                ${oc.player_image ? `<img src="${oc.player_image}" class="w-full h-full object-cover">` : formatInitials(oc.player_name)}
+                            </div>
+                            <div class="truncate">
+                                <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(oc.player_name)}</h4>
+                                <div class="flex items-center gap-1.5 mt-0.5">
+                                    <span class="w-2 h-2 rounded-full inline-block" style="background-color: ${teamCol}"></span>
+                                    <span class="text-xs font-semibold text-slate-600 truncate">${escapeHtml(oc.team_name)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 p-3 bg-amber-50/70 rounded-xl border border-amber-200/60 flex items-center justify-between">
+                            <div>
+                                <span class="text-[10px] font-bold uppercase text-amber-800">Tournament Runs</span>
+                                <div class="text-2xl font-black text-amber-950">${oc.runs} <span class="text-xs font-bold text-amber-700">runs</span></div>
+                            </div>
+                            <div class="text-right text-xs">
+                                <div class="font-bold text-slate-700">HS: <span class="font-black text-slate-900">${oc.highest_score}</span></div>
+                                <div class="text-[11px] text-slate-500">SR: ${oc.strike_rate}</div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-1.5 mt-3 text-center text-[11px]">
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">Inns</div>
+                                <div class="font-bold text-slate-800">${oc.innings}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">Avg</div>
+                                <div class="font-bold text-slate-800">${oc.average}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">4s</div>
+                                <div class="font-bold text-slate-800">${oc.fours}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">6s</div>
+                                <div class="font-bold text-slate-800">${oc.sixes}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${runnerUpsHtml}
+                </div>
+            `;
+        } else {
+            ocEl.innerHTML = `
+                <div class="bg-gradient-to-br from-amber-500 to-orange-500 p-4 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">🧢</span>
+                        <h3 class="text-xs font-black uppercase tracking-wider text-amber-100">Orange Cap</h3>
+                    </div>
+                </div>
+                <div class="p-8 text-center text-slate-400 text-xs flex-1 flex flex-col items-center justify-center">
+                    <span class="text-2xl mb-1">🏏</span>
+                    <span>No completed batting stats yet</span>
+                </div>
+            `;
+        }
+    }
+
+    // 2. Purple Cap Card
+    const pcEl = document.getElementById("award-card-purple-cap");
+    const pc = awards ? awards.purple_cap : null;
+    if (pcEl) {
+        if (pc) {
+            let teamCol = pc.team_color || "#7c3aed";
+            let topBowlers = currentStatsLeaderboards?.bowling?.top_wicket_takers || [];
+            let runnerUps = topBowlers.slice(1, 3);
+            let runnerUpsHtml = runnerUps.length > 0 ? `
+                <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Runners Up:</span>
+                    ${runnerUps.map(r => `
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="text-slate-600 font-medium truncate max-w-[140px]">${escapeHtml(r.player_name)} (${escapeHtml(r.team_name)})</span>
+                            <span class="font-bold text-slate-800">${r.wickets} wkts</span>
+                        </div>
+                    `).join("")}
+                </div>
+            ` : "";
+
+            pcEl.innerHTML = `
+                <div class="bg-gradient-to-br from-purple-600 via-indigo-600 to-violet-700 p-4 text-white">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">🧢</span>
+                            <div>
+                                <h3 class="text-xs font-black uppercase tracking-wider text-purple-200">Purple Cap</h3>
+                                <div class="text-[11px] text-white/80 font-medium">Leading Wicket Taker</div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/20 text-white uppercase tracking-wider border border-white/30">#1 Bowler</span>
+                    </div>
+                </div>
+                <div class="p-5 flex flex-col justify-between flex-1">
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
+                                ${pc.player_image ? `<img src="${pc.player_image}" class="w-full h-full object-cover">` : formatInitials(pc.player_name)}
+                            </div>
+                            <div class="truncate">
+                                <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(pc.player_name)}</h4>
+                                <div class="flex items-center gap-1.5 mt-0.5">
+                                    <span class="w-2 h-2 rounded-full inline-block" style="background-color: ${teamCol}"></span>
+                                    <span class="text-xs font-semibold text-slate-600 truncate">${escapeHtml(pc.team_name)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 p-3 bg-purple-50/70 rounded-xl border border-purple-200/60 flex items-center justify-between">
+                            <div>
+                                <span class="text-[10px] font-bold uppercase text-purple-800">Tournament Wickets</span>
+                                <div class="text-2xl font-black text-purple-950">${pc.wickets} <span class="text-xs font-bold text-purple-700">wkts</span></div>
+                            </div>
+                            <div class="text-right text-xs">
+                                <div class="font-bold text-slate-700">BBI: <span class="font-black text-slate-900">${pc.best_figures}</span></div>
+                                <div class="text-[11px] text-slate-500">Econ: ${pc.economy}</div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-1.5 mt-3 text-center text-[11px]">
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">Overs</div>
+                                <div class="font-bold text-slate-800">${pc.overs_display}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">Mdns</div>
+                                <div class="font-bold text-slate-800">${pc.maidens}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">Runs</div>
+                                <div class="font-bold text-slate-800">${pc.runs_conceded}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400 font-medium">Dots</div>
+                                <div class="font-bold text-slate-800">${pc.dot_balls}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${runnerUpsHtml}
+                </div>
+            `;
+        } else {
+            pcEl.innerHTML = `
+                <div class="bg-gradient-to-br from-purple-600 to-indigo-700 p-4 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">🧢</span>
+                        <h3 class="text-xs font-black uppercase tracking-wider text-purple-200">Purple Cap</h3>
+                    </div>
+                </div>
+                <div class="p-8 text-center text-slate-400 text-xs flex-1 flex flex-col items-center justify-center">
+                    <span class="text-2xl mb-1">⚾</span>
+                    <span>No completed bowling stats yet</span>
+                </div>
+            `;
+        }
+    }
+
+    // 3. Tournament MVP Crown
+    const mvpEl = document.getElementById("award-card-mvp");
+    const mvp = awards ? awards.mvp : (mvpList && mvpList.length > 0 ? mvpList[0] : null);
+    if (mvpEl) {
+        if (mvp) {
+            let teamCol = mvp.team_color || "#f59e0b";
+            let runnerUps = mvpList.slice(1, 3);
+            let runnerUpsHtml = runnerUps.length > 0 ? `
+                <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Runners Up:</span>
+                    ${runnerUps.map(r => `
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="text-slate-600 font-medium truncate max-w-[140px]">${escapeHtml(r.player_name)} (${escapeHtml(r.team_name)})</span>
+                            <span class="font-bold text-slate-800">${r.mvp_points} pts</span>
+                        </div>
+                    `).join("")}
+                </div>
+            ` : "";
+
+            mvpEl.innerHTML = `
+                <div class="bg-gradient-to-br from-yellow-500 via-amber-500 to-amber-600 p-4 text-slate-950 font-bold">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">👑</span>
+                            <div>
+                                <h3 class="text-xs font-black uppercase tracking-wider text-amber-950">Tournament MVP</h3>
+                                <div class="text-[11px] text-amber-900/80 font-medium">Most Valuable Player</div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-950/20 text-amber-950 uppercase tracking-wider border border-amber-950/30">Top Impact</span>
+                    </div>
+                </div>
+                <div class="p-5 flex flex-col justify-between flex-1">
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
+                                ${mvp.player_image ? `<img src="${mvp.player_image}" class="w-full h-full object-cover">` : formatInitials(mvp.player_name)}
+                            </div>
+                            <div class="truncate">
+                                <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(mvp.player_name)}</h4>
+                                <div class="flex items-center gap-1.5 mt-0.5">
+                                    <span class="w-2 h-2 rounded-full inline-block" style="background-color: ${teamCol}"></span>
+                                    <span class="text-xs font-semibold text-slate-600 truncate">${escapeHtml(mvp.team_name)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 p-3 bg-yellow-50/70 rounded-xl border border-yellow-200/60 flex items-center justify-between">
+                            <div>
+                                <span class="text-[10px] font-bold uppercase text-amber-800">Total MVP Impact</span>
+                                <div class="text-2xl font-black text-amber-950">${mvp.mvp_points} <span class="text-xs font-bold text-amber-700">pts</span></div>
+                            </div>
+                            <div class="text-right text-xs">
+                                <div class="font-bold text-slate-700">${mvp.runs}r • ${mvp.wickets}w</div>
+                                <div class="text-[11px] text-slate-500">${mvp.boundaries} bnd • ${mvp.catches + mvp.stumpings} fld</div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-1.5 mt-3 text-center text-[10px]">
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400">Bat Pts</div>
+                                <div class="font-bold text-slate-800">${mvp.run_pts + mvp.boundary_pts}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400">Bowl Pts</div>
+                                <div class="font-bold text-slate-800">${mvp.wicket_pts + mvp.dot_pts}</div>
+                            </div>
+                            <div class="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                <div class="text-slate-400">Field Pts</div>
+                                <div class="font-bold text-slate-800">${mvp.field_pts}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${runnerUpsHtml}
+                </div>
+            `;
+        } else {
+            mvpEl.innerHTML = `
+                <div class="bg-gradient-to-br from-yellow-500 to-amber-600 p-4 text-slate-950 font-bold">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">👑</span>
+                        <h3 class="text-xs font-black uppercase tracking-wider text-amber-950">Tournament MVP</h3>
+                    </div>
+                </div>
+                <div class="p-8 text-center text-slate-400 text-xs flex-1 flex flex-col items-center justify-center">
+                    <span class="text-2xl mb-1">🌟</span>
+                    <span>No player impact records yet</span>
+                </div>
+            `;
+        }
+    }
+
+    // 4. Boundary Kings Card
+    const bkEl = document.getElementById("award-card-boundary-king");
+    const bk = awards ? awards.boundary_king : null;
+    const max6 = awards ? awards.maximum_sixes : null;
+    if (bkEl) {
+        if (bk) {
+            let teamCol = bk.team_color || "#e11d48";
+            bkEl.innerHTML = `
+                <div class="bg-gradient-to-br from-rose-600 via-pink-600 to-red-600 p-4 text-white">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">⚡</span>
+                            <div>
+                                <h3 class="text-xs font-black uppercase tracking-wider text-rose-100">Boundary Kings</h3>
+                                <div class="text-[11px] text-white/80 font-medium">Most 4s & 6s Hit</div>
+                            </div>
+                        </div>
+                        <span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/20 text-white uppercase tracking-wider border border-white/30">Power</span>
+                    </div>
+                </div>
+                <div class="p-5 flex flex-col justify-between flex-1">
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md shrink-0 overflow-hidden" style="background-color: ${teamCol}">
+                                ${bk.player_image ? `<img src="${bk.player_image}" class="w-full h-full object-cover">` : formatInitials(bk.player_name)}
+                            </div>
+                            <div class="truncate">
+                                <h4 class="font-extrabold text-base text-slate-900 truncate leading-tight">${escapeHtml(bk.player_name)}</h4>
+                                <div class="flex items-center gap-1.5 mt-0.5">
+                                    <span class="w-2 h-2 rounded-full inline-block" style="background-color: ${teamCol}"></span>
+                                    <span class="text-xs font-semibold text-slate-600 truncate">${escapeHtml(bk.team_name)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 p-3 bg-rose-50/70 rounded-xl border border-rose-200/60 flex items-center justify-between">
+                            <div>
+                                <span class="text-[10px] font-bold uppercase text-rose-800">Total Boundaries</span>
+                                <div class="text-2xl font-black text-rose-950">${bk.boundaries} <span class="text-xs font-bold text-rose-700">bnd</span></div>
+                            </div>
+                            <div class="text-right text-xs">
+                                <div class="font-bold text-slate-700">${bk.fours} <span class="text-[10px] text-slate-500 font-normal">Fours (4s)</span></div>
+                                <div class="font-bold text-slate-700">${bk.sixes} <span class="text-[10px] text-slate-500 font-normal">Sixes (6s)</span></div>
+                            </div>
+                        </div>
+
+                        ${max6 ? `
+                            <div class="mt-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
+                                <div class="flex items-center gap-2 truncate">
+                                    <span class="text-base">🚀</span>
+                                    <div class="truncate">
+                                        <div class="text-[10px] font-bold text-slate-400 uppercase">Maximum Sixes Award</div>
+                                        <div class="font-bold text-slate-800 truncate">${escapeHtml(max6.player_name)}</div>
+                                    </div>
+                                </div>
+                                <span class="px-2 py-0.5 rounded-lg bg-rose-100 text-rose-700 font-black text-xs shrink-0">${max6.sixes} Sixes</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        } else {
+            bkEl.innerHTML = `
+                <div class="bg-gradient-to-br from-rose-600 to-red-600 p-4 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">⚡</span>
+                        <h3 class="text-xs font-black uppercase tracking-wider text-rose-100">Boundary Kings</h3>
+                    </div>
+                </div>
+                <div class="p-8 text-center text-slate-400 text-xs flex-1 flex flex-col items-center justify-center">
+                    <span class="text-2xl mb-1">🏏</span>
+                    <span>No boundary records yet</span>
+                </div>
+            `;
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// 2. BATTING LEADERBOARDS
+// -------------------------------------------------------------------------
+function renderBattingLeaderboards(batting = {}) {
+    // 1. Top Scorers Table
+    const topTbody = document.getElementById("leaderboard-top-scorers-tbody");
+    const topScorers = batting?.top_scorers || [];
+    if (topTbody) {
+        if (topScorers.length === 0) {
+            topTbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-xs text-slate-400">No batting data recorded yet.</td></tr>`;
+        } else {
+            topTbody.innerHTML = topScorers.map(b => {
+                let col = b.team_color || "#3b82f6";
+                return `
+                    <tr class="hover:bg-amber-50/30 transition-colors">
+                        <td class="py-3 px-4 text-center">${getRankBadgeHtml(b.rank)}</td>
+                        <td class="py-3 px-4 font-bold text-slate-900">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden" style="background-color: ${col}">
+                                    ${b.player_image ? `<img src="${b.player_image}" class="w-full h-full object-cover">` : formatInitials(b.player_name)}
+                                </div>
+                                <span class="truncate max-w-[150px]">${escapeHtml(b.player_name)}</span>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                                <span class="w-2 h-2 rounded-full inline-block" style="background-color: ${col}"></span>
+                                ${escapeHtml(b.team_name)}
+                            </span>
+                        </td>
+                        <td class="py-3 px-3 text-center font-semibold text-slate-700">${b.innings}</td>
+                        <td class="py-3 px-3 text-center text-slate-500">${b.not_outs}</td>
+                        <td class="py-3 px-4 text-center font-black text-amber-600 bg-amber-50/50 text-base">${b.runs}</td>
+                        <td class="py-3 px-3 text-center font-mono text-xs text-slate-600">${b.balls}</td>
+                        <td class="py-3 px-3 text-center font-bold text-slate-800">${b.highest_score}</td>
+                        <td class="py-3 px-3 text-center font-bold text-slate-800">${b.average}</td>
+                        <td class="py-3 px-3 text-center font-bold text-slate-800">${b.strike_rate}</td>
+                        <td class="py-3 px-3 text-center font-semibold text-slate-600">${b.fours}</td>
+                        <td class="py-3 px-3 text-center font-semibold text-slate-600">${b.sixes}</td>
+                        <td class="py-3 px-3 text-center text-xs font-bold text-slate-500">${b.fifties} / ${b.hundreds}</td>
+                    </tr>
+                `;
+            }).join("");
+        }
+    }
+
+    // 2. Highest Individual Scores
+    renderMiniList("leaderboard-highest-scores-list", batting?.highest_individual_scores, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">vs ${escapeHtml(item.against_team)} (${item.balls}b)</div>
+                </div>
+            </div>
+            <span class="font-black text-sm text-slate-900 bg-slate-100 px-2.5 py-0.5 rounded-lg">${item.score_str}</span>
+        </div>
+    `);
+
+    // 3. Fastest Fifties
+    renderMiniList("leaderboard-fastest-fifties-list", batting?.fastest_fifties, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">${item.runs} runs (SR: ${item.strike_rate})</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">${item.balls_faced} balls</span>
+        </div>
+    `, "No fifties recorded yet in selected scope.");
+
+    // 4. Best Strike Rate
+    let minSrBadge = document.getElementById("stats-min-sr-badge");
+    if (minSrBadge && batting?.min_strike_rate_balls) minSrBadge.innerText = `min. ${batting.min_strike_rate_balls} balls`;
+    renderMiniList("leaderboard-best-sr-list", batting?.best_strike_rates, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">${item.runs} runs (${item.balls} balls)</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg">${item.strike_rate} SR</span>
+        </div>
+    `);
+
+    // 5. Best Average
+    renderMiniList("leaderboard-best-avg-list", batting?.best_averages, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">${item.runs} runs in ${item.innings} inns</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">${item.average} Avg</span>
+        </div>
+    `);
+
+    // 6. Most Sixes
+    renderMiniList("leaderboard-most-sixes-list", batting?.most_sixes, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">${escapeHtml(item.team_name)}</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg">${item.sixes} 6s</span>
+        </div>
+    `);
+
+    // 7. Most Fours
+    renderMiniList("leaderboard-most-fours-list", batting?.most_fours, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">${escapeHtml(item.team_name)}</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-lg">${item.fours} 4s</span>
+        </div>
+    `);
+}
+
+// -------------------------------------------------------------------------
+// 3. BOWLING LEADERBOARDS
+// -------------------------------------------------------------------------
+function renderBowlingLeaderboards(bowling = {}) {
+    // Top Wicket Takers Table
+    const bowlTbody = document.getElementById("leaderboard-top-bowlers-tbody");
+    const topBowlers = bowling?.top_wicket_takers || [];
+    if (bowlTbody) {
+        if (topBowlers.length === 0) {
+            bowlTbody.innerHTML = `<tr><td colspan="11" class="py-12 text-center text-xs text-slate-400">No bowling data recorded yet.</td></tr>`;
+        } else {
+            bowlTbody.innerHTML = topBowlers.map(bw => {
+                let col = bw.team_color || "#7c3aed";
+                return `
+                    <tr class="hover:bg-purple-50/30 transition-colors">
+                        <td class="py-3 px-4 text-center">${getRankBadgeHtml(bw.rank)}</td>
+                        <td class="py-3 px-4 font-bold text-slate-900">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden" style="background-color: ${col}">
+                                    ${bw.player_image ? `<img src="${bw.player_image}" class="w-full h-full object-cover">` : formatInitials(bw.player_name)}
+                                </div>
+                                <span class="truncate max-w-[150px]">${escapeHtml(bw.player_name)}</span>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                                <span class="w-2 h-2 rounded-full inline-block" style="background-color: ${col}"></span>
+                                ${escapeHtml(bw.team_name)}
+                            </span>
+                        </td>
+                        <td class="py-3 px-3 text-center font-semibold text-slate-700">${bw.innings}</td>
+                        <td class="py-3 px-3 text-center font-mono text-xs text-slate-700">${bw.overs_display}</td>
+                        <td class="py-3 px-3 text-center text-slate-500">${bw.maidens}</td>
+                        <td class="py-3 px-3 text-center font-mono text-xs text-slate-600">${bw.runs_conceded}</td>
+                        <td class="py-3 px-4 text-center font-black text-purple-600 bg-purple-50/50 text-base">${bw.wickets}</td>
+                        <td class="py-3 px-3 text-center font-bold text-slate-800">${bw.best_figures}</td>
+                        <td class="py-3 px-3 text-center font-bold text-slate-800">${bw.economy}</td>
+                        <td class="py-3 px-3 text-center font-semibold text-slate-600">${bw.dot_balls}</td>
+                    </tr>
+                `;
+            }).join("");
+        }
+    }
+
+    // Best Bowling Figures
+    renderMiniList("leaderboard-best-figures-list", bowling?.best_bowling_figures, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">vs ${escapeHtml(item.against_team)} (${item.overs_display} ov)</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-lg">${item.figures_str}</span>
+        </div>
+    `);
+
+    // Best Economy Rate
+    let minEconBadge = document.getElementById("stats-min-econ-badge");
+    if (minEconBadge && bowling?.min_economy_overs) minEconBadge.innerText = `min. ${bowling.min_economy_overs} ov`;
+    renderMiniList("leaderboard-best-economy-list", bowling?.best_economy_rates, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">${item.overs_display} ov, ${item.runs_conceded}r</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">${item.economy} RPO</span>
+        </div>
+    `);
+
+    // Most Dot Balls
+    renderMiniList("leaderboard-most-dots-list", bowling?.most_dot_balls, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.player_name)}</div>
+                    <div class="text-[11px] text-slate-400">${escapeHtml(item.team_name)}</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-slate-800 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg">${item.dot_balls} dots</span>
+        </div>
+    `);
+}
+
+// -------------------------------------------------------------------------
+// 4. MVP POINTS TABLE
+// -------------------------------------------------------------------------
+function renderMvpStandings(mvpList = []) {
+    const mvpTbody = document.getElementById("leaderboard-mvp-tbody");
+    if (!mvpTbody) return;
+
+    if (mvpList.length === 0) {
+        mvpTbody.innerHTML = `<tr><td colspan="10" class="py-12 text-center text-xs text-slate-400">No MVP impact records calculated yet.</td></tr>`;
         return;
     }
-    
-    try {
-        let res = await fetch(`${TOURNAMENT_API_BASE}/tournaments/${tournId}/leaderboards/`);
-        if (!res.ok) throw new Error("Failed to fetch leaderboards");
-        let data = await res.json();
-        
-        let fmtPlayerInfo = (p) => {
-            let img = p.image ? `<img src="${p.image}" class="w-8 h-8 rounded-lg object-cover bg-slate-100">` : `<div class="w-8 h-8 rounded-lg bg-slate-200 text-slate-600 font-bold flex items-center justify-center text-xs">${p.name.charAt(0)}</div>`;
-            return `<div class="flex items-center gap-2">
-                        ${img}
-                        <div>
-                            <div class="font-bold text-xs text-slate-900">${escapeHtml(p.name)}</div>
-                            <div class="text-[10px] text-slate-500">${escapeHtml(p.team || '')}</div>
+
+    mvpTbody.innerHTML = mvpList.map(p => {
+        let col = p.team_color || "#f59e0b";
+        let fldTotal = (p.catches || 0) + (p.stumpings || 0) + (p.run_outs || 0);
+        return `
+            <tr class="hover:bg-amber-50/30 transition-colors">
+                <td class="py-3 px-4 text-center">${getRankBadgeHtml(p.rank)}</td>
+                <td class="py-3 px-4 font-bold text-slate-900">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0 overflow-hidden" style="background-color: ${col}">
+                            ${p.player_image ? `<img src="${p.player_image}" class="w-full h-full object-cover">` : formatInitials(p.player_name)}
                         </div>
-                    </div>`;
-        };
-        
-        // MVP
-        let elMvp = document.getElementById("stats-mvp");
-        if (elMvp) {
-            elMvp.innerHTML = (data.mvp && data.mvp.length > 0) ? data.mvp.map((item, idx) => `
-                <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="py-2.5 px-4 text-center font-bold text-slate-400">#${idx+1}</td>
-                    <td class="py-2.5 px-4">${fmtPlayerInfo(item.player)}</td>
-                    <td class="py-2.5 px-4 text-xs font-semibold text-slate-600">${escapeHtml(item.player.team || '')}</td>
-                    <td class="py-2.5 px-4 text-right font-black text-amber-600">${item.value} pts</td>
-                </tr>
-            `).join("") : `<tr><td colspan="4" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
-        }
+                        <span class="truncate max-w-[150px]">${escapeHtml(p.player_name)}</span>
+                    </div>
+                </td>
+                <td class="py-3 px-4">
+                    <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                        <span class="w-2 h-2 rounded-full inline-block" style="background-color: ${col}"></span>
+                        ${escapeHtml(p.team_name)}
+                    </span>
+                </td>
+                <td class="py-3 px-3 text-center">${getRoleBadgeHtml(p.role)}</td>
+                <td class="py-3 px-3 text-center font-semibold text-slate-700">${p.runs} <span class="text-[10px] text-slate-400 font-normal">(+${p.run_pts})</span></td>
+                <td class="py-3 px-3 text-center font-semibold text-slate-700">${p.boundaries} <span class="text-[10px] text-slate-400 font-normal">(+${p.boundary_pts})</span></td>
+                <td class="py-3 px-3 text-center font-bold text-purple-700">${p.wickets} <span class="text-[10px] text-purple-400 font-normal">(+${p.wicket_pts})</span></td>
+                <td class="py-3 px-3 text-center font-mono text-xs text-slate-600">${p.dot_balls} <span class="text-[10px] text-slate-400 font-normal">(+${p.dot_pts})</span></td>
+                <td class="py-3 px-3 text-center font-bold text-emerald-700">${fldTotal} <span class="text-[10px] text-emerald-500 font-normal">(+${p.field_pts})</span></td>
+                <td class="py-3 px-5 text-center font-black text-amber-600 bg-amber-50/60 text-base">${p.mvp_points}</td>
+            </tr>
+        `;
+    }).join("");
+}
 
-        // Top Scorers
-        let elTopScorers = document.getElementById("stats-top-scorers");
-        if (elTopScorers) {
-            elTopScorers.innerHTML = (data.batting.top_scorers && data.batting.top_scorers.length > 0) ? data.batting.top_scorers.map((item, idx) => `
+// -------------------------------------------------------------------------
+// 5. FIELDING & KEEPING AWARDS
+// -------------------------------------------------------------------------
+function renderFieldingLeaderboards(fielding = {}) {
+    // Best Fielder
+    const fTbody = document.getElementById("leaderboard-top-fielders-tbody");
+    const topFielders = fielding?.top_fielders || [];
+    if (fTbody) {
+        if (topFielders.length === 0) {
+            fTbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-xs text-slate-400">No outfield dismissals recorded yet.</td></tr>`;
+        } else {
+            fTbody.innerHTML = topFielders.map(f => `
                 <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
-                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
-                    <td class="py-2 px-4 text-right font-black text-slate-800">${item.value}</td>
+                    <td class="py-2.5 px-3 text-center">${getRankBadgeHtml(f.rank)}</td>
+                    <td class="py-2.5 px-3 font-bold text-slate-800">${escapeHtml(f.player_name)}</td>
+                    <td class="py-2.5 px-3 text-xs text-slate-600">${escapeHtml(f.team_name)}</td>
+                    <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${f.catches}</td>
+                    <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${f.run_outs}</td>
+                    <td class="py-2.5 px-3 text-center font-black text-sm text-emerald-700">${f.total_dismissals}</td>
                 </tr>
-            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
+            `).join("");
         }
-
-        // Highest Score
-        let elHighestScore = document.getElementById("stats-highest-score");
-        if (elHighestScore) {
-            elHighestScore.innerHTML = (data.batting.highest_score && data.batting.highest_score.length > 0) ? data.batting.highest_score.map((item, idx) => `
-                <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
-                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
-                    <td class="py-2 px-4 text-right font-black text-slate-800">${item.runs}${item.not_out ? '*' : ''} <span class="text-[10px] text-slate-500 font-normal">(${item.balls})</span></td>
-                </tr>
-            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
-        }
-        
-        // Most 6s
-        let elMost6s = document.getElementById("stats-most-6s");
-        if (elMost6s) {
-            elMost6s.innerHTML = (data.batting.most_6s && data.batting.most_6s.length > 0) ? data.batting.most_6s.map((item, idx) => `
-                <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
-                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
-                    <td class="py-2 px-4 text-right font-black text-emerald-600">${item.value}</td>
-                </tr>
-            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
-        }
-
-        // Most 4s
-        let elMost4s = document.getElementById("stats-most-4s");
-        if (elMost4s) {
-            elMost4s.innerHTML = (data.batting.most_4s && data.batting.most_4s.length > 0) ? data.batting.most_4s.map((item, idx) => `
-                <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
-                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
-                    <td class="py-2 px-4 text-right font-black text-cyan-600">${item.value}</td>
-                </tr>
-            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
-        }
-
-        // Top Wickets
-        let elTopWickets = document.getElementById("stats-top-wickets");
-        if (elTopWickets) {
-            elTopWickets.innerHTML = (data.bowling.top_wickets && data.bowling.top_wickets.length > 0) ? data.bowling.top_wickets.map((item, idx) => `
-                <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
-                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
-                    <td class="py-2 px-4 text-right font-black text-purple-700">${item.value}</td>
-                </tr>
-            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
-        }
-
-        // Best Figures
-        let elBestFigures = document.getElementById("stats-best-figures");
-        if (elBestFigures) {
-            elBestFigures.innerHTML = (data.bowling.best_figures && data.bowling.best_figures.length > 0) ? data.bowling.best_figures.map((item, idx) => `
-                <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="py-2 px-4 w-10 text-center font-bold text-slate-400">#${idx+1}</td>
-                    <td class="py-2 px-4">${fmtPlayerInfo(item.player)}</td>
-                    <td class="py-2 px-4 text-right font-black text-indigo-700">${item.wickets}/${item.runs} <span class="text-[10px] text-slate-500 font-normal">(${item.overs})</span></td>
-                </tr>
-            `).join("") : `<tr><td colspan="3" class="py-4 text-center text-slate-400 text-xs">No data yet</td></tr>`;
-        }
-
-    } catch(err) {
-        console.error("Error fetching leaderboards:", err);
-        showToast("Error loading leaderboards", "error");
     }
-};
 
+    // Best Keeper
+    const kTbody = document.getElementById("leaderboard-top-keepers-tbody");
+    const topKeepers = fielding?.top_keepers || [];
+    if (kTbody) {
+        if (topKeepers.length === 0) {
+            kTbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-xs text-slate-400">No wicket-keeper dismissals recorded yet.</td></tr>`;
+        } else {
+            kTbody.innerHTML = topKeepers.map(k => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-2.5 px-3 text-center">${getRankBadgeHtml(k.rank)}</td>
+                    <td class="py-2.5 px-3 font-bold text-slate-800">${escapeHtml(k.player_name)}</td>
+                    <td class="py-2.5 px-3 text-xs text-slate-600">${escapeHtml(k.team_name)}</td>
+                    <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${k.catches}</td>
+                    <td class="py-2.5 px-2 text-center text-xs font-semibold text-slate-700">${k.stumpings}</td>
+                    <td class="py-2.5 px-3 text-center font-black text-sm text-amber-700">${k.total_dismissals}</td>
+                </tr>
+            `).join("");
+        }
+    }
+}
 
+// -------------------------------------------------------------------------
+// 6. TEAM HIGHLIGHTS
+// -------------------------------------------------------------------------
+function renderTeamHighlights(highlights = {}) {
+    // Highest Team Scores
+    renderMiniList("highlights-team-scores-list", highlights?.highest_team_scores, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.team_name)}</div>
+                    <div class="text-[11px] text-slate-400">vs ${escapeHtml(item.against_team)} (${item.overs_display} ov)</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-slate-900 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg">${item.runs}/${item.wickets}</span>
+        </div>
+    `);
 
+    // Highest Run Chases
+    renderMiniList("highlights-run-chases-list", highlights?.highest_successful_run_chases, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.team_name)}</div>
+                    <div class="text-[11px] text-slate-400">vs ${escapeHtml(item.against_team)} (${item.overs_display} ov)</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">Chased ${item.target_chased} (${item.runs_scored}/${item.wickets_lost})</span>
+        </div>
+    `, "No successful run chases recorded yet.");
 
+    // Highest Partnerships
+    renderMiniList("highlights-partnerships-list", highlights?.highest_partnerships, (item) => `
+        <div class="flex items-center justify-between py-2 text-xs">
+            <div class="flex items-center gap-2 truncate">
+                ${getRankBadgeHtml(item.rank)}
+                <div class="truncate">
+                    <div class="font-bold text-slate-800 truncate">${escapeHtml(item.batter_1)} & ${escapeHtml(item.batter_2)}</div>
+                    <div class="text-[11px] text-slate-400">${escapeHtml(item.team_name)} vs ${escapeHtml(item.against_team)}</div>
+                </div>
+            </div>
+            <span class="font-black text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">${item.runs} Runs</span>
+        </div>
+    `);
+}
+
+function renderMiniList(containerId, list = [], templateFn, emptyMsg = "No records recorded yet.") {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    if (!list || list.length === 0) {
+        el.innerHTML = `<div class="py-6 text-center text-xs text-slate-400">${emptyMsg}</div>`;
+        return;
+    }
+    el.innerHTML = list.map(templateFn).join("");
+}

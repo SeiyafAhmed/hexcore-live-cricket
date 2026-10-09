@@ -231,16 +231,15 @@
                 <span id="badge-tournaments-count" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">0</span>
             </button>
 
-            <!-- Tab 5: Tournament Stats -->
+            <!-- Tab 5: Tournament Stats & Awards -->
             <button id="nav-tab-stats" onclick="switchSidebarTab('stats')" class="w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800/40 group">
                 <div class="flex items-center gap-3">
-                    <svg class="w-5 h-5 text-slate-400 group-hover:text-emerald-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="20" x2="18" y2="10"/>
-                        <line x1="12" y1="20" x2="12" y2="4"/>
-                        <line x1="6" y1="20" x2="6" y2="14"/>
+                    <svg class="w-5 h-5 text-slate-400 group-hover:text-amber-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                     </svg>
-                    <span class="font-semibold">Awards & Stats</span>
+                    <span class="font-semibold">Stats & Awards</span>
                 </div>
+                <span id="badge-stats-status" class="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">CAPS</span>
             </button>
         </nav>
 
@@ -310,11 +309,17 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Batting Team</label>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600">Batting Team</label>
+                                <span id="setup-batting-group-badge" class="hidden text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Group</span>
+                            </div>
                             <select id="setup-batting-team" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
                         </div>
                         <div>
-                            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Bowling Team</label>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600">Bowling Team</label>
+                                <span id="setup-bowling-group-badge" class="hidden text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Group</span>
+                            </div>
                             <select id="setup-bowling-team" class="border border-slate-300 rounded-xl p-3 w-full bg-slate-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800 transition-all"></select>
                         </div>
                         <div>
@@ -921,131 +926,423 @@
                     </div>
                 </div>
 
+            </div>
         </div>
 
+        <!-- ================================================================= -->
         <!-- TAB 5: TOURNAMENT STATS & AWARDS VIEW                             -->
         <!-- ================================================================= -->
-        <div id="view-stats" class="app-tab-view flex-1 hidden p-8 animate-fade-in">
+        <div id="view-stats" class="app-tab-view flex-1 hidden p-8 animate-fade-in overflow-y-auto">
             <div class="max-w-7xl mx-auto flex flex-col gap-6">
-                <!-- Header -->
+
+                <!-- Header & Action Bar -->
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
                     <div>
                         <div class="flex items-center gap-2.5">
-                            <span class="text-2xl">⭐</span>
+                            <span class="text-2xl">🏅</span>
                             <h1 class="heading-font text-3xl font-extrabold text-slate-900">Tournament Stats & Awards</h1>
                         </div>
-                        <p class="text-sm text-slate-500 mt-1">Comprehensive leaderboards for batting, bowling, fielding, and MVP rankings.</p>
+                        <p class="text-sm text-slate-500 mt-1">Official leaderboards, individual caps, impact MVP rankings, and team records across tournament matches.</p>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button onclick="loadStatsView()" class="bg-white hover:bg-slate-50 text-slate-700 font-bold px-3.5 py-2.5 rounded-xl border border-slate-300 shadow-sm active:scale-98 transition-all flex items-center gap-2 text-xs">
+                            <svg class="w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                            <span>Refresh Stats</span>
+                        </button>
                     </div>
                 </div>
 
-                <!-- Control Bar -->
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
-                    <div class="min-w-[260px]">
-                        <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Select Tournament</label>
-                        <select id="stats-tournament-select" onchange="onStatsTournamentSelected(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white shadow-sm transition-all"></select>
-                    </div>
-                    <button onclick="refreshLeaderboards()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl border border-slate-300 shadow-sm active:scale-98 transition-all flex items-center gap-2 text-sm">
-                        <svg class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.63-6.37L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.63 6.37L22 14"/></svg>
-                        <span>Refresh Stats</span>
-                    </button>
+                <!-- Empty State if No Tournaments -->
+                <div id="stats-empty-state" class="hidden bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm">
+                    <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-3xl">🏆</div>
+                    <h3 class="heading-font text-xl font-bold text-slate-800">No Tournament Selected</h3>
+                    <p class="text-sm text-slate-500 max-w-md mx-auto mt-1 mb-6">Create or select a tournament to view automated leaderboards, caps, and player award rankings.</p>
                 </div>
 
-                <!-- Stats Grid -->
-                <div id="stats-content-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    
-                    <!-- MVP Board -->
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col xl:col-span-3">
-                        <div class="px-5 py-3 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 flex items-center justify-between">
-                            <span class="font-black heading-font flex items-center gap-2">🏆 Most Valuable Player (MVP) Rankings</span>
-                        </div>
-                        <div class="p-0 overflow-x-auto">
-                            <table class="w-full text-sm text-left">
-                                <thead class="bg-slate-50 border-b border-slate-100 text-[10px] uppercase font-bold text-slate-500">
-                                    <tr>
-                                        <th class="py-2 px-4 text-center w-12">Rank</th>
-                                        <th class="py-2 px-4">Player</th>
-                                        <th class="py-2 px-4">Team</th>
-                                        <th class="py-2 px-4 text-right">Impact Points</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="stats-mvp" class="divide-y divide-slate-100"></tbody>
-                            </table>
+                <!-- Main Stats Container -->
+                <div id="stats-main-content" class="flex flex-col gap-6">
+
+                    <!-- Filter Toolbar: Tournament & Group Selectors -->
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                        <div class="flex items-center gap-4 flex-wrap flex-1">
+                            <!-- Tournament Selector -->
+                            <div class="min-w-[240px]">
+                                <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Tournament</label>
+                                <select id="stats-tournament-select" onchange="onStatsTournamentChange(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white shadow-sm transition-all"></select>
+                            </div>
+
+                            <!-- Group Selector -->
+                            <div class="min-w-[240px]">
+                                <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Group / Stage Filter</label>
+                                <select id="stats-group-select" onchange="onStatsGroupChange(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white shadow-sm transition-all">
+                                    <option value="all">Overall Tournament (All Groups)</option>
+                                </select>
+                            </div>
+
+                            <!-- Stats Meta Badges -->
+                            <div class="flex items-center gap-2 pt-3 sm:pt-4 flex-wrap">
+                                <span id="stats-meta-matches" class="px-3 py-1 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1.5">
+                                    <span>🏏</span> <span id="stats-meta-matches-val">0 Matches Completed</span>
+                                </span>
+                                <span id="stats-meta-season" class="px-3 py-1 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5">
+                                    <span>📅</span> <span id="stats-meta-season-val">Season 2026</span>
+                                </span>
+                                <span id="stats-meta-scope" class="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                                    <span>🌐</span> <span id="stats-meta-scope-val">Overall Tournament</span>
+                                </span>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Orange Cap (Most Runs) -->
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                        <div class="px-5 py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white flex items-center justify-between">
-                            <span class="font-bold heading-font flex items-center gap-2">🏏 Orange Cap (Most Runs)</span>
+                    <!-- 1. MAJOR AWARDS SHOWCASE (GRID CARDS) -->
+                    <!-- Orange Cap, Purple Cap, MVP Leaderboard, Boundary Kings -->
+                    <div>
+                        <div class="flex items-center justify-between mb-3.5">
+                            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                                <span>Crown Awards & Cap Leaders</span>
+                                <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black">Official</span>
+                            </h2>
                         </div>
-                        <div class="p-0">
-                            <table class="w-full text-sm text-left">
-                                <tbody id="stats-top-scorers" class="divide-y divide-slate-100"></tbody>
-                            </table>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                            <!-- Orange Cap Card -->
+                            <div id="award-card-orange-cap" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow"></div>
+
+                            <!-- Purple Cap Card -->
+                            <div id="award-card-purple-cap" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow"></div>
+
+                            <!-- Tournament MVP Card -->
+                            <div id="award-card-mvp" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow"></div>
+
+                            <!-- Boundary Kings Card -->
+                            <div id="award-card-boundary-king" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow"></div>
                         </div>
                     </div>
 
-                    <!-- Purple Cap (Most Wickets) -->
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                        <div class="px-5 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white flex items-center justify-between">
-                            <span class="font-bold heading-font flex items-center gap-2">🎯 Purple Cap (Most Wickets)</span>
+                    <!-- 2. LEADERBOARD CATEGORY SUB-TABS -->
+                    <div class="flex flex-col gap-4">
+                        <div class="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto">
+                            <button id="stats-subtab-batting" onclick="switchStatsSubTab('batting')" class="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white shadow-sm flex items-center gap-1.5 transition-all">
+                                <span>🏏</span> Batting Leaders
+                            </button>
+                            <button id="stats-subtab-bowling" onclick="switchStatsSubTab('bowling')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 flex items-center gap-1.5 transition-all">
+                                <span>⚾</span> Bowling Leaders
+                            </button>
+                            <button id="stats-subtab-mvp" onclick="switchStatsSubTab('mvp')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 flex items-center gap-1.5 transition-all">
+                                <span>👑</span> MVP Impact Table
+                            </button>
+                            <button id="stats-subtab-fielding" onclick="switchStatsSubTab('fielding')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 flex items-center gap-1.5 transition-all">
+                                <span>🧤</span> Fielding & Keeping
+                            </button>
+                            <button id="stats-subtab-teams" onclick="switchStatsSubTab('teams')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 flex items-center gap-1.5 transition-all">
+                                <span>🔥</span> Team Highlights
+                            </button>
                         </div>
-                        <div class="p-0">
-                            <table class="w-full text-sm text-left">
-                                <tbody id="stats-top-wickets" class="divide-y divide-slate-100"></tbody>
-                            </table>
-                        </div>
-                    </div>
 
-                    <!-- Highest Score -->
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                        <div class="px-5 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white flex items-center justify-between">
-                            <span class="font-bold heading-font flex items-center gap-2">💥 Highest Individual Score</span>
-                        </div>
-                        <div class="p-0">
-                            <table class="w-full text-sm text-left">
-                                <tbody id="stats-highest-score" class="divide-y divide-slate-100"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                    
-                    <!-- Most 6s -->
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                        <div class="px-5 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white flex items-center justify-between">
-                            <span class="font-bold heading-font flex items-center gap-2">🚀 Maximum Sixes</span>
-                        </div>
-                        <div class="p-0">
-                            <table class="w-full text-sm text-left">
-                                <tbody id="stats-most-6s" class="divide-y divide-slate-100"></tbody>
-                            </table>
-                        </div>
-                    </div>
+                        <!-- SECTION 1: BATTING LEADERBOARDS -->
+                        <div id="stats-section-batting" class="stats-sub-section flex flex-col gap-6">
+                            <!-- Top Scorers Table (Most Runs) -->
+                            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-base font-bold text-slate-800 heading-font">Top Run Scorers (Orange Cap Race)</span>
+                                        <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">Most Runs</span>
+                                    </div>
+                                    <span class="text-xs text-slate-400">Total Runs in Tournament</span>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm border-collapse">
+                                        <thead>
+                                            <tr class="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 select-none">
+                                                <th class="py-3 px-4 w-14 text-center">Rank</th>
+                                                <th class="py-3 px-4">Player</th>
+                                                <th class="py-3 px-4">Team</th>
+                                                <th class="py-3 px-3 text-center">Inns</th>
+                                                <th class="py-3 px-3 text-center">NO</th>
+                                                <th class="py-3 px-4 text-center font-extrabold text-amber-600 bg-amber-50/50">Runs</th>
+                                                <th class="py-3 px-3 text-center">Balls</th>
+                                                <th class="py-3 px-3 text-center font-bold">HS</th>
+                                                <th class="py-3 px-3 text-center font-bold">Avg</th>
+                                                <th class="py-3 px-3 text-center font-bold">SR</th>
+                                                <th class="py-3 px-3 text-center text-slate-500">4s</th>
+                                                <th class="py-3 px-3 text-center text-slate-500">6s</th>
+                                                <th class="py-3 px-3 text-center text-slate-500">50 / 100</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="leaderboard-top-scorers-tbody" class="divide-y divide-slate-100"></tbody>
+                                    </table>
+                                </div>
+                            </div>
 
-                    <!-- Most 4s -->
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                        <div class="px-5 py-3 bg-gradient-to-r from-cyan-500 to-cyan-600 text-white flex items-center justify-between">
-                            <span class="font-bold heading-font flex items-center gap-2">💨 Maximum Fours</span>
-                        </div>
-                        <div class="p-0">
-                            <table class="w-full text-sm text-left">
-                                <tbody id="stats-most-4s" class="divide-y divide-slate-100"></tbody>
-                            </table>
-                        </div>
-                    </div>
+                            <!-- Batting Grid Breakdown: Highest Scores, Fastest 50/100, Best SR, Best Avg, Most 6s & 4s -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                <!-- Highest Individual Score -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">💥 Highest Individual Scores</span>
+                                        <span class="text-[10px] font-bold text-slate-400">Match Innings</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-highest-scores-list"></div>
+                                </div>
 
-                    <!-- Best Bowling Figures -->
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                        <div class="px-5 py-3 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white flex items-center justify-between">
-                            <span class="font-bold heading-font flex items-center gap-2">🌪️ Best Bowling Figures</span>
+                                <!-- Fastest 50 / 100 (Fewest Balls) -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">⚡ Fastest Fifties (Fewest Balls)</span>
+                                        <span class="text-[10px] font-bold text-slate-400">Milestone</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-fastest-fifties-list"></div>
+                                </div>
+
+                                <!-- Best Strike Rate (min. 30 balls) -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">🚀 Best Strike Rate</span>
+                                        <span class="text-[10px] font-bold text-slate-400" id="stats-min-sr-badge">min. balls</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-best-sr-list"></div>
+                                </div>
+
+                                <!-- Best Average -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">🎯 Best Batting Average</span>
+                                        <span class="text-[10px] font-bold text-slate-400">Consistency</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-best-avg-list"></div>
+                                </div>
+
+                                <!-- Most Sixes -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">🚀 Maximum Sixes (6s)</span>
+                                        <span class="text-[10px] font-bold text-slate-400">Big Hitters</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-most-sixes-list"></div>
+                                </div>
+
+                                <!-- Most Fours -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">⚡ Most Fours (4s)</span>
+                                        <span class="text-[10px] font-bold text-slate-400">Boundary Count</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-most-fours-list"></div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="p-0">
-                            <table class="w-full text-sm text-left">
-                                <tbody id="stats-best-figures" class="divide-y divide-slate-100"></tbody>
-                            </table>
+
+                        <!-- SECTION 2: BOWLING LEADERBOARDS -->
+                        <div id="stats-section-bowling" class="stats-sub-section hidden flex flex-col gap-6">
+                            <!-- Top Wicket Takers (Purple Cap) -->
+                            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-base font-bold text-slate-800 heading-font">Top Wicket Takers (Purple Cap Race)</span>
+                                        <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">Leading Wickets</span>
+                                    </div>
+                                    <span class="text-xs text-slate-400">Ranked by Wickets & Economy</span>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm border-collapse">
+                                        <thead>
+                                            <tr class="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 select-none">
+                                                <th class="py-3 px-4 w-14 text-center">Rank</th>
+                                                <th class="py-3 px-4">Bowler</th>
+                                                <th class="py-3 px-4">Team</th>
+                                                <th class="py-3 px-3 text-center">Inns</th>
+                                                <th class="py-3 px-3 text-center">Overs</th>
+                                                <th class="py-3 px-3 text-center">Mdns</th>
+                                                <th class="py-3 px-3 text-center">Runs</th>
+                                                <th class="py-3 px-4 text-center font-extrabold text-purple-600 bg-purple-50/50">Wkts</th>
+                                                <th class="py-3 px-3 text-center font-bold">BBI</th>
+                                                <th class="py-3 px-3 text-center font-bold">Econ</th>
+                                                <th class="py-3 px-3 text-center text-slate-500">Dots</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="leaderboard-top-bowlers-tbody" class="divide-y divide-slate-100"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Bowling Grid: Best Figures, Best Economy, Most Dot Balls -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                <!-- Best Bowling Figures -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">🎯 Best Bowling Figures</span>
+                                        <span class="text-[10px] font-bold text-slate-400">Match Innings</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-best-figures-list"></div>
+                                </div>
+
+                                <!-- Best Economy Rate -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">🛡️ Best Economy Rate</span>
+                                        <span class="text-[10px] font-bold text-slate-400" id="stats-min-econ-badge">min. overs</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-best-economy-list"></div>
+                                </div>
+
+                                <!-- Most Dot Balls -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">⚪ Most Dot Balls</span>
+                                        <span class="text-[10px] font-bold text-slate-400">Pressure</span>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="leaderboard-most-dots-list"></div>
+                                </div>
+                            </div>
                         </div>
+
+                        <!-- SECTION 3: MVP IMPACT TABLE -->
+                        <div id="stats-section-mvp" class="stats-sub-section hidden flex flex-col gap-6">
+                            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div class="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-base font-bold text-slate-800 heading-font">Most Valuable Player (MVP) Points Standings</span>
+                                            <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 border border-yellow-200">Impact Ranking</span>
+                                        </div>
+                                        <p class="text-xs text-slate-500 mt-0.5">Automated weighted formula: 1 pt/run • 1 pt/boundary • 20 pts/wicket • 1 pt/dot ball • 10 pts/fielding dismissal</p>
+                                    </div>
+                                    <div class="flex items-center gap-2 text-xs font-semibold text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                                        <span>👑 1st Rank Wins Tournament MVP Award</span>
+                                    </div>
+                                </div>
+
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm border-collapse">
+                                        <thead>
+                                            <tr class="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 select-none">
+                                                <th class="py-3.5 px-4 w-14 text-center">Rank</th>
+                                                <th class="py-3.5 px-4">Player</th>
+                                                <th class="py-3.5 px-4">Team</th>
+                                                <th class="py-3.5 px-3 text-center">Role</th>
+                                                <th class="py-3.5 px-3 text-center" title="1 pt per run">Runs (1pt)</th>
+                                                <th class="py-3.5 px-3 text-center" title="1 pt per 4 or 6">Boundaries (1pt)</th>
+                                                <th class="py-3.5 px-3 text-center text-purple-700" title="20 pts per wicket">Wickets (20pt)</th>
+                                                <th class="py-3.5 px-3 text-center text-slate-600" title="1 pt per dot ball">Dots (1pt)</th>
+                                                <th class="py-3.5 px-3 text-center text-emerald-700" title="10 pts per catch/stumping/run-out">Fielding (10pt)</th>
+                                                <th class="py-3.5 px-5 text-center font-black text-amber-600 bg-amber-50/60" title="Total MVP Points">MVP Points</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="leaderboard-mvp-tbody" class="divide-y divide-slate-100"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SECTION 4: FIELDING & KEEPING -->
+                        <div id="stats-section-fielding" class="stats-sub-section hidden flex flex-col gap-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <!-- Best Fielder (Catches + Run-outs as non-keeper) -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-emerald-50/50">
+                                        <div>
+                                            <span class="text-base font-bold text-slate-800 heading-font">Best Fielder Award</span>
+                                            <p class="text-xs text-slate-500">Outfield catches + run-outs (non-keeper)</p>
+                                        </div>
+                                        <span class="text-xl">🏃</span>
+                                    </div>
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full text-left text-sm border-collapse">
+                                            <thead>
+                                                <tr class="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                                                    <th class="py-2.5 px-3 w-12 text-center">Rank</th>
+                                                    <th class="py-2.5 px-3">Fielder</th>
+                                                    <th class="py-2.5 px-3">Team</th>
+                                                    <th class="py-2.5 px-2 text-center">Catches</th>
+                                                    <th class="py-2.5 px-2 text-center">Run-Outs</th>
+                                                    <th class="py-2.5 px-3 text-center font-black text-emerald-700">Total Dismissals</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="leaderboard-top-fielders-tbody" class="divide-y divide-slate-100"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Best Keeper (Stumpings + Catches behind) -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-amber-50/50">
+                                        <div>
+                                            <span class="text-base font-bold text-slate-800 heading-font">Best Wicket Keeper Award</span>
+                                            <p class="text-xs text-slate-500">Stumpings + catches behind the stumps</p>
+                                        </div>
+                                        <span class="text-xl">🧤</span>
+                                    </div>
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full text-left text-sm border-collapse">
+                                            <thead>
+                                                <tr class="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                                                    <th class="py-2.5 px-3 w-12 text-center">Rank</th>
+                                                    <th class="py-2.5 px-3">Wicket Keeper</th>
+                                                    <th class="py-2.5 px-3">Team</th>
+                                                    <th class="py-2.5 px-2 text-center">Catches</th>
+                                                    <th class="py-2.5 px-2 text-center">Stumpings</th>
+                                                    <th class="py-2.5 px-3 text-center font-black text-amber-700">Total Dismissals</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="leaderboard-top-keepers-tbody" class="divide-y divide-slate-100"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SECTION 5: TEAM HIGHLIGHTS -->
+                        <div id="stats-section-teams" class="stats-sub-section hidden flex flex-col gap-6">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <!-- Highest Team Score -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-lg">🏏</span>
+                                            <div>
+                                                <span class="text-sm font-bold text-slate-800 heading-font">Highest Team Totals</span>
+                                                <p class="text-[11px] text-slate-400">Total runs scored in an innings</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="highlights-team-scores-list"></div>
+                                </div>
+
+                                <!-- Highest Successful Run Chase -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-lg">🎯</span>
+                                            <div>
+                                                <span class="text-sm font-bold text-slate-800 heading-font">Highest Successful Run Chases</span>
+                                                <p class="text-[11px] text-slate-400">Target successfully chased down</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="highlights-run-chases-list"></div>
+                                </div>
+
+                                <!-- Highest Partnership -->
+                                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-lg">🤝</span>
+                                            <div>
+                                                <span class="text-sm font-bold text-slate-800 heading-font">Highest Partnerships</span>
+                                                <p class="text-[11px] text-slate-400">Top batting partnership stands</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="p-3 divide-y divide-slate-100 flex-1" id="highlights-partnerships-list"></div>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
 
                 </div>
+
             </div>
         </div>
 
